@@ -1,0 +1,235 @@
+---
+title: Bronze Layer Data Ingestion
+description: Raw data storage layer for ingesting unprocessed data from ERP and CRM systems
+---
+
+The Bronze layer is the first stage of the data warehouse pipeline, responsible for ingesting raw data from source systems without any transformations. This layer serves as a historical archive of source system data.
+
+## Purpose
+
+The Bronze layer provides:
+
+<CardGroup cols={2}>
+  <Card title="Raw Data Storage" icon="database">
+    Preserves original data format and structure from source systems
+  </Card>
+  <Card title="Historical Archive" icon="clock-rotate-left">
+    Maintains a complete history of data as received from sources
+  </Card>
+  <Card title="Audit Trail" icon="file-certificate">
+    Enables data lineage tracking and compliance requirements
+  </Card>
+  <Card title="Reprocessing" icon="arrows-rotate">
+    Allows downstream transformations to be rebuilt from source
+  </Card>
+</CardGroup>
+
+## Data Sources
+
+The Bronze layer ingests data from two primary source systems:
+
+<Tabs>
+  <Tab title="CRM System">
+    Customer Relationship Management data including:
+    - Customer information (`cust_info.csv`)
+    - Product catalog (`prd_info.csv`)
+    - Sales transactions (`sales_details.csv`)
+  </Tab>
+  <Tab title="ERP System">
+    Enterprise Resource Planning data including:
+    - Customer demographics (`CUST_AZ12.csv`)
+    - Location data (`LOC_A101.csv`)
+    - Product categorization (`PX_CAT_G1V2.csv`)
+  </Tab>
+</Tabs>
+
+## Bronze Tables
+
+The Bronze schema contains six tables that mirror the source system structures:
+
+### CRM Tables
+
+<AccordionGroup>
+  <Accordion title="bronze.crm_cust_info" icon="user">
+    Customer information from the CRM system.
+
+    ```sql
+    CREATE TABLE bronze.crm_cust_info (
+        cst_id INT,
+        cst_key VARCHAR(50),
+        cst_firstname VARCHAR(100),
+        cst_lastname VARCHAR(100),
+        cst_marital_status VARCHAR(100),
+        cst_gndr VARCHAR(10),
+        cst_create_date DATE
+    );
+    ```
+
+    **Key Fields:**
+    - `cst_id`: Customer identifier
+    - `cst_key`: Customer business key
+    - `cst_gndr`: Gender (raw codes: M/F)
+    - `cst_marital_status`: Marital status (raw codes: S/M)
+  </Accordion>
+
+  <Accordion title="bronze.crm_prd_info" icon="box">
+    Product catalog from the CRM system.
+
+    ```sql
+    CREATE TABLE bronze.crm_prd_info (
+        prd_id INT,
+        prd_key VARCHAR(50),
+        prd_name VARCHAR(100),
+        prd_cost DECIMAL(10, 2),
+        prd_line CHAR(10),
+        prd_start_dt DATE,
+        prd_end_dt DATE
+    );
+    ```
+
+    **Key Fields:**
+    - `prd_id`: Product identifier
+    - `prd_key`: Product business key (contains category prefix)
+    - `prd_line`: Product line code (M/R/S/T)
+    - `prd_start_dt`/`prd_end_dt`: Product validity period
+  </Accordion>
+
+  <Accordion title="bronze.crm_sales_details" icon="cart-shopping">
+    Sales transaction details from the CRM system.
+
+    ```sql
+    CREATE TABLE bronze.crm_sales_details (
+        sls_ord_num VARCHAR(50),
+        sls_prd_key VARCHAR(50),
+        sls_cust_id INT,
+        sls_ord_dt INT,
+        sls_ship_dt INT,
+        sls_due_dt INT,
+        sls_sales INT,
+        sls_quantity INT,
+        sls_price DECIMAL(10, 2)
+    );
+    ```
+
+    <Note>
+      Date fields are stored as integers in YYYYMMDD format and require transformation in the Silver layer.
+    </Note>
+  </Accordion>
+</AccordionGroup>
+
+### ERP Tables
+
+<AccordionGroup>
+  <Accordion title="bronze.erp_cust_az12" icon="user-tie">
+    Customer demographic data from the ERP system.
+
+    ```sql
+    CREATE TABLE bronze.erp_cust_az12 (
+        cid VARCHAR(50),
+        bdate DATE,
+        gen VARCHAR(10)
+    );
+    ```
+  </Accordion>
+
+  <Accordion title="bronze.erp_loc_a101" icon="location-dot">
+    Customer location data from the ERP system.
+
+    ```sql
+    CREATE TABLE bronze.erp_loc_a101 (
+        cid VARCHAR(50),
+        cntry VARCHAR(100)
+    );
+    ```
+  </Accordion>
+
+  <Accordion title="bronze.erp_px_cat_g1v2" icon="layer-group">
+    Product category and maintenance information.
+
+    ```sql
+    CREATE TABLE bronze.erp_px_cat_g1v2 (
+        id VARCHAR(50),
+        cat VARCHAR(50),
+        subcat VARCHAR(50),
+        manteinance VARCHAR(50)
+    );
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Loading Process
+
+Data is loaded into Bronze tables using PostgreSQL's `COPY` command for efficient bulk loading:
+
+<Steps>
+  <Step title="Truncate Target Table">
+    Each table is truncated before loading to ensure a clean load:
+    
+    ```sql
+    TRUNCATE TABLE bronze.crm_cust_info;
+    ```
+  </Step>
+
+  <Step title="Execute COPY Command">
+    Data is loaded directly from CSV files using the COPY command:
+    
+    ```sql
+    COPY bronze.crm_cust_info
+      FROM '/datasets/source_crm/cust_info.csv'
+      WITH (FORMAT csv, HEADER true);
+    ```
+  </Step>
+
+  <Step title="Validate Load">
+    The procedure tracks success/failure and execution time for each table load.
+  </Step>
+</Steps>
+
+### Loading Procedure
+
+The `bronze.load_bronze()` procedure orchestrates the entire Bronze layer data load:
+
+```sql
+CALL bronze.load_bronze();
+```
+
+<Info>
+  The procedure loads all six tables sequentially, with error handling for each table. If any load fails, the procedure raises an exception with detailed error information.
+</Info>
+
+## File Locations
+
+Source files are organized by system:
+
+<CodeGroup>
+```bash CRM Files
+/datasets/source_crm/
+├── cust_info.csv
+├── prd_info.csv
+└── sales_details.csv
+```
+
+```bash ERP Files
+/datasets/source_erp/
+├── CUST_AZ12.csv
+├── LOC_A101.csv
+└── PX_CAT_G1V2.csv
+```
+</CodeGroup>
+
+## Next Steps
+
+<Card title="Silver Layer Transformations" icon="arrow-right" href="/pipeline/silver-layer">
+  Learn how Bronze data is cleansed and standardized in the Silver layer
+</Card>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="ETL Procedures" icon="gears" href="/pipeline/etl-procedures">
+    Detailed documentation on ETL orchestration
+  </Card>
+  <Card title="Gold Layer" icon="star" href="/pipeline/gold-layer">
+    Business-ready analytics models
+  </Card>
+</CardGroup>

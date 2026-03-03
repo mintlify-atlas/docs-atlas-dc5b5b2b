@@ -1,0 +1,141 @@
+---
+title: SQL Data Warehouse Project
+description: A modern data warehouse built with PostgreSQL, implementing Medallion Architecture with automated ETL pipelines for multi-source data integration and analytics
+---
+
+## Welcome to the SQL Data Warehouse
+
+This project demonstrates a comprehensive data warehousing and analytics solution built with PostgreSQL. It showcases industry best practices in data engineering, from raw data ingestion to business-ready analytics using the Medallion Architecture pattern.
+
+<Note>
+  This project consolidates sales data from multiple source systems (ERP and CRM) into a unified, analytical data model optimized for business intelligence and reporting.
+</Note>
+
+## Medallion Architecture Overview
+
+The data warehouse follows the **Medallion Architecture** with three distinct layers:
+
+<CardGroup cols={3}>
+  <Card title="Bronze Layer" icon="database">
+    **Raw Data Storage**
+    
+    Ingests raw data as-is from source systems (CSV files) into PostgreSQL tables. No transformations applied - preserving data lineage and enabling reprocessing.
+  </Card>
+  
+  <Card title="Silver Layer" icon="filter">
+    **Cleaned & Standardized**
+    
+    Applies data cleansing, standardization, and normalization. Handles data quality issues, deduplication, and business rule transformations.
+  </Card>
+  
+  <Card title="Gold Layer" icon="star">
+    **Analytics-Ready**
+    
+    Star schema dimensional model with fact and dimension tables optimized for analytical queries and BI reporting.
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<AccordionGroup>
+  <Accordion title="Medallion Architecture" icon="layer-group">
+    Three-layer architecture (Bronze-Silver-Gold) ensuring data quality progression from raw ingestion to analytics-ready models.
+  </Accordion>
+  
+  <Accordion title="Automated ETL Pipelines" icon="arrows-rotate">
+    Stored procedures automate the extract, transform, and load process:
+    - `bronze.load_bronze()` - Loads raw CSV data from source systems
+    - `silver.load_silver()` - Cleanses and standardizes data with quality checks
+  </Accordion>
+  
+  <Accordion title="Star Schema Design" icon="diagram-project">
+    Optimized dimensional model with:
+    - **Fact Table**: `fact_sales` - Sales transactions with metrics
+    - **Dimensions**: `dim_customer`, `dim_product` - Business entities for slicing and dicing
+  </Accordion>
+  
+  <Accordion title="Data Quality Validation" icon="check-double">
+    Built-in data quality checks including:
+    - Deduplication logic
+    - Date format validation and correction
+    - Null handling and default values
+    - Cross-field validation (e.g., sales = quantity × price)
+  </Accordion>
+  
+  <Accordion title="Multi-Source Integration" icon="code-merge">
+    Integrates data from two source systems:
+    - **CRM System**: Customer info, product info, sales details
+    - **ERP System**: Customer demographics, location data, product categories
+  </Accordion>
+  
+  <Accordion title="Docker-Based PostgreSQL" icon="docker">
+    Containerized PostgreSQL 16 deployment with:
+    - Docker Compose configuration for easy setup
+    - Persistent volume storage
+    - Pre-mounted dataset directory
+  </Accordion>
+</AccordionGroup>
+
+## Project Objectives
+
+### Data Engineering Focus
+
+<Steps>
+  <Step title="Consolidate Multi-Source Data">
+    Import and integrate data from ERP and CRM systems provided as CSV files into a unified PostgreSQL data warehouse.
+  </Step>
+  
+  <Step title="Ensure Data Quality">
+    Cleanse and resolve data quality issues including duplicates, invalid dates, inconsistent formats, and missing values before analysis.
+  </Step>
+  
+  <Step title="Build Analytical Model">
+    Combine sources into a user-friendly star schema data model optimized for analytical queries and business intelligence.
+  </Step>
+  
+  <Step title="Enable Analytics & Reporting">
+    Provide a solid foundation for SQL-based analytics to deliver insights into customer behavior, product performance, and sales trends.
+  </Step>
+</Steps>
+
+## Get Started
+
+<CardGroup cols={3}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get your data warehouse up and running in minutes with Docker
+  </Card>
+  
+  <Card title="Architecture" icon="sitemap" href="/architecture/overview">
+    Deep dive into the Medallion Architecture and data flow
+  </Card>
+  
+  <Card title="Schema Reference" icon="table" href="/schema/bronze/crm-tables">
+    Explore the complete data model and table structures
+  </Card>
+</CardGroup>
+
+## Repository Structure
+
+```
+data-warehouse-project/
+│
+├── datasets/              # Raw CSV data (ERP and CRM sources)
+│
+├── docs/                  # Architecture diagrams and documentation
+│   ├── DataWareHouse.png  # Project architecture overview
+│   ├── data_flow.png      # Data flow visualization
+│   └── data_model.drawio.png  # Data model diagram
+│
+├── scripts/               # SQL scripts for ETL and transformations
+│   ├── bronze/           # Raw data extraction and loading
+│   ├── silver/           # Data cleaning and transformation
+│   └── gold/             # Analytical model creation (star schema)
+│
+├── tests/                # Data quality validation scripts
+│
+└── docker-compose.yml    # PostgreSQL container configuration
+```
+
+<Tip>
+  This project focuses on the latest dataset only - data historization is not implemented in this version.
+</Tip>

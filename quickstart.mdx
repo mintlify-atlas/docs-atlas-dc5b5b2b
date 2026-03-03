@@ -1,80 +1,245 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quick Start Guide"
+description: "Get your SQL Data Warehouse up and running with Docker and PostgreSQL in minutes"
 ---
 
-## Get started in three steps
+## Prerequisites
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+Before you begin, ensure you have the following installed:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Docker" icon="docker">
+    Docker Engine 20.10 or higher for containerized PostgreSQL
+  </Card>
+  <Card title="PostgreSQL Client" icon="database">
+    psql or any PostgreSQL client for database interaction
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Setup Instructions
+
+Follow these steps to set up your SQL Data Warehouse with Bronze, Silver, and Gold layers:
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the project repository to your local machine:
+    
+    ```bash
+    git clone https://github.com/LeoBellier/sql-data-warehouse-project.git
+    cd sql-data-warehouse-project
+    ```
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Create a `.env` file in the root directory with your PostgreSQL credentials:
+    
+    ```bash .env
+    POSTGRES_USER=your_username
+    POSTGRES_PASSWORD=your_password
+    POSTGRES_DB=datawarehouse
+    ```
+    
+    <Note>
+      These credentials will be used by the PostgreSQL container defined in `docker-compose.yml`
+    </Note>
+  </Step>
+
+  <Step title="Start PostgreSQL Container">
+    Launch the PostgreSQL database using Docker Compose:
+    
+    ```bash
+    docker-compose up -d
+    ```
+    
+    This will start a PostgreSQL 16 container named `datawarehouse` on port 5432 with the datasets mounted as read-only volumes.
+    
+    <Check>
+      Verify the container is running: `docker ps`
+    </Check>
+  </Step>
+
+  <Step title="Create Database Schemas">
+    Connect to the database and create the Bronze, Silver, and Gold schemas:
+    
+    ```bash
+    psql -h localhost -U your_username -d datawarehouse -f scripts/SchemaCreator.sql
+    ```
+    
+    This creates three schemas following the Medallion Architecture:
+    - **Bronze**: Raw data layer
+    - **Silver**: Cleaned and standardized data
+    - **Gold**: Business-ready analytical models
+  </Step>
+
+  <Step title="Create Bronze Layer Tables">
+    Set up the Bronze layer tables for raw data ingestion:
+    
+    ```bash
+    psql -h localhost -U your_username -d datawarehouse -f scripts/bronze/ddl_bronze.sql
+    ```
+    
+    This creates tables for:
+    - CRM data: `crm_cust_info`, `crm_prd_info`, `crm_sales_details`
+    - ERP data: `erp_cust_az12`, `erp_loc_a101`, `erp_px_cat_g1v2`
+  </Step>
+
+  <Step title="Create Silver Layer Tables">
+    Set up the Silver layer tables for cleaned data:
+    
+    ```bash
+    psql -h localhost -U your_username -d datawarehouse -f scripts/silver/ddl_silver.sql
+    ```
+    
+    These tables mirror the Bronze layer structure but include data quality improvements and tracking timestamps.
+  </Step>
+
+  <Step title="Create Gold Layer Views">
+    Set up the Gold layer analytical views:
+    
+    ```bash
+    psql -h localhost -U your_username -d datawarehouse -f scripts/gold/ddl_gold.sql
+    ```
+    
+    This creates star schema components:
+    - `dim_customer`: Customer dimension
+    - `dim_product`: Product dimension
+    - `fact_sales`: Sales fact table
+  </Step>
+</Steps>
+
+## Running the ETL Pipeline
+
+Once the setup is complete, execute the ETL pipeline to populate your data warehouse:
+
+<AccordionGroup>
+  <Accordion title="Load Bronze Layer" icon="arrow-down-to-bracket">
+    Load raw data from CSV files into Bronze layer tables:
+    
+    ```sql
+    CALL bronze.load_bronze();
+    ```
+    
+    This procedure:
+    - Loads CRM customer, product, and sales data
+    - Imports ERP customer demographics, location, and product category data
+    - Truncates existing data before loading
+    - Provides execution time metrics for each table
+  </Accordion>
+
+  <Accordion title="Load Silver Layer" icon="broom">
+    Transform and clean data from Bronze to Silver layer:
+    
+    ```sql
+    CALL silver.load_silver();
+    ```
+    
+    This procedure applies data quality rules and standardization to prepare data for analytics.
+  </Accordion>
+</AccordionGroup>
+
+## Verifying the Setup
+
+Use these queries to verify your data warehouse is set up correctly:
+
+<CodeGroup>
+  ```sql Bronze Layer
+  -- Check Bronze layer tables
+  SELECT 'crm_cust_info' as table_name, COUNT(*) as row_count 
+  FROM bronze.crm_cust_info
+  UNION ALL
+  SELECT 'crm_prd_info', COUNT(*) FROM bronze.crm_prd_info
+  UNION ALL
+  SELECT 'crm_sales_details', COUNT(*) FROM bronze.crm_sales_details
+  UNION ALL
+  SELECT 'erp_cust_az12', COUNT(*) FROM bronze.erp_cust_az12
+  UNION ALL
+  SELECT 'erp_loc_a101', COUNT(*) FROM bronze.erp_loc_a101
+  UNION ALL
+  SELECT 'erp_px_cat_g1v2', COUNT(*) FROM bronze.erp_px_cat_g1v2;
+  ```
+
+  ```sql Silver Layer
+  -- Check Silver layer tables
+  SELECT 'crm_cust_info' as table_name, COUNT(*) as row_count 
+  FROM silver.crm_cust_info
+  UNION ALL
+  SELECT 'crm_prd_info', COUNT(*) FROM silver.crm_prd_info
+  UNION ALL
+  SELECT 'crm_sales_details', COUNT(*) FROM silver.crm_sales_details;
+  ```
+
+  ```sql Gold Layer
+  -- Check Gold layer views
+  SELECT 'dim_customer' as view_name, COUNT(*) as row_count 
+  FROM gold.dim_customer
+  UNION ALL
+  SELECT 'dim_product', COUNT(*) FROM gold.dim_product
+  UNION ALL
+  SELECT 'fact_sales', COUNT(*) FROM gold.fact_sales;
+  ```
+</CodeGroup>
+
+## Next Steps
+
+Now that your data warehouse is set up, explore these topics:
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="diagram-project" href="/architecture/overview">
+    Learn about the Medallion Architecture and data flow
+  </Card>
+  <Card title="Bronze Layer Tables" icon="database" href="/schema/bronze/crm-tables">
+    Explore the raw data schema in the Bronze layer
+  </Card>
+  <Card title="ETL Procedures" icon="gears" href="/pipeline/etl-procedures">
+    Deep dive into ETL procedures and transformations
+  </Card>
+  <Card title="Gold Layer Analytics" icon="chart-line" href="/pipeline/gold-layer">
+    Understand the star schema for analytics and reporting
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Container won't start" icon="triangle-exclamation">
+    **Issue**: Docker container fails to start or exits immediately
+    
+    **Solutions**:
+    - Ensure port 5432 is not already in use: `lsof -i :5432`
+    - Check Docker logs: `docker logs datawarehouse`
+    - Verify your `.env` file has all required variables
+    - Ensure Docker has sufficient resources allocated
+  </Accordion>
+
+  <Accordion title="Cannot connect to database" icon="plug">
+    **Issue**: Connection refused when trying to connect via psql
+    
+    **Solutions**:
+    - Verify container is running: `docker ps`
+    - Check PostgreSQL is listening: `docker exec datawarehouse pg_isready`
+    - Confirm credentials in `.env` match connection string
+    - Wait a few seconds after container starts for PostgreSQL to initialize
+  </Accordion>
+
+  <Accordion title="ETL procedure fails" icon="circle-xmark">
+    **Issue**: `CALL bronze.load_bronze()` or `CALL silver.load_silver()` fails
+    
+    **Solutions**:
+    - Check that CSV files exist in the `datasets/` directory
+    - Verify the datasets volume is mounted: `docker inspect datawarehouse`
+    - Review error messages in the procedure output
+    - Ensure all schema and table DDL scripts ran successfully
+    - Check file permissions on the datasets directory
+  </Accordion>
+
+  <Accordion title="Missing data in Gold layer" icon="table">
+    **Issue**: Gold layer views return no data or incomplete data
+    
+    **Solutions**:
+    - Ensure Bronze and Silver layers are populated first
+    - Verify the ETL procedures completed successfully
+    - Check for NULL values in join keys between layers
+    - Review the view definitions in `scripts/gold/ddl_gold.sql`
+    - Run the verification queries for each layer
+  </Accordion>
+</AccordionGroup>

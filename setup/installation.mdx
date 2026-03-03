@@ -1,0 +1,200 @@
+---
+title: Installation
+description: Step-by-step guide to installing and setting up the SQL Data Warehouse project
+---
+
+Follow these steps to get your SQL Data Warehouse project up and running.
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the project repository to your local machine:
+
+    ```bash
+    git clone <repository-url>
+    cd data-warehouse-project
+    ```
+
+    <Info>
+      Replace `<repository-url>` with the actual URL of your Git repository.
+    </Info>
+
+    The project structure will look like this:
+
+    ```
+    data-warehouse-project/
+    ├── datasets/          # Raw datasets (ERP and CRM data)
+    ├── docs/              # Documentation and architecture diagrams
+    ├── scripts/           # SQL scripts for ETL
+    │   ├── bronze/        # Raw data extraction scripts
+    │   ├── silver/        # Data cleaning scripts
+    │   └── gold/          # Analytical model scripts
+    ├── tests/             # Test scripts
+    ├── docker-compose.yml # Docker configuration
+    └── README.md          # Project overview
+    ```
+  </Step>
+
+  <Step title="Set Up Environment Variables">
+    Create a `.env` file in the root directory to configure your PostgreSQL database:
+
+    ```bash
+    touch .env
+    ```
+
+    Add the following environment variables to the `.env` file:
+
+    ```bash .env
+    POSTGRES_USER=warehouse_admin
+    POSTGRES_PASSWORD=your_secure_password
+    POSTGRES_DB=datawarehouse
+    ```
+
+    <Warning>
+      **Security Note**: Never commit the `.env` file to version control. It should already be listed in `.gitignore`.
+    </Warning>
+
+    <Tip>
+      Choose a strong password for `POSTGRES_PASSWORD` to secure your database.
+    </Tip>
+  </Step>
+
+  <Step title="Prepare the Datasets">
+    Place your CSV files in the `datasets/` directory:
+
+    ```bash
+    datasets/
+    ├── erp_sales.csv
+    ├── erp_products.csv
+    ├── crm_customers.csv
+    └── crm_interactions.csv
+    ```
+
+    <Note>
+      The exact filenames may vary based on your data sources. Ensure all required CSV files are present before proceeding.
+    </Note>
+
+    The datasets will be automatically mounted into the Docker container at `/datasets` (read-only).
+  </Step>
+
+  <Step title="Start Docker Containers">
+    Launch the PostgreSQL database using Docker Compose:
+
+    ```bash
+    docker compose up -d
+    ```
+
+    This command will:
+    - Pull the PostgreSQL 16 Alpine image
+    - Create and start the `datawarehouse` container
+    - Set up the database with your environment variables
+    - Mount the datasets directory
+
+    <Tip>
+      The `-d` flag runs containers in detached mode (in the background).
+    </Tip>
+  </Step>
+
+  <Step title="Verify Installation">
+    Check that the container is running:
+
+    ```bash
+    docker ps
+    ```
+
+    You should see output similar to:
+
+    ```
+    CONTAINER ID   IMAGE                  STATUS         PORTS                    NAMES
+    abc123def456   postgres:16-alpine     Up 10 seconds  0.0.0.0:5432->5432/tcp   datawarehouse
+    ```
+
+    Connect to the database to verify it's working:
+
+    ```bash
+    docker exec -it datawarehouse psql -U warehouse_admin -d datawarehouse
+    ```
+
+    <Check>If you see the PostgreSQL prompt (`datawarehouse=#`), the installation was successful!</Check>
+  </Step>
+
+  <Step title="Run Bronze Layer Scripts">
+    Load raw data from CSV files into the Bronze layer:
+
+    ```bash
+    docker exec -it datawarehouse psql -U warehouse_admin -d datawarehouse -f /scripts/bronze/load_data.sql
+    ```
+
+    <Info>
+      The Bronze layer stores raw data as-is from the source systems without any transformations.
+    </Info>
+  </Step>
+</Steps>
+
+## Post-Installation
+
+<CardGroup cols={2}>
+  <Card title="Docker Setup" icon="docker" href="/setup/docker-setup">
+    Learn more about Docker configuration and management
+  </Card>
+  
+  <Card title="Data Architecture" icon="diagram-project" href="/architecture/overview">
+    Understand the Medallion Architecture used in this project
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Port 5432 already in use" icon="triangle-exclamation">
+    If you have another PostgreSQL instance running locally:
+    
+    ```bash
+    # Stop local PostgreSQL service
+    sudo service postgresql stop
+    
+    # Or change the port in docker-compose.yml
+    ports:
+      - "5433:5432"  # Use port 5433 instead
+    ```
+  </Accordion>
+
+  <Accordion title="Permission denied for datasets" icon="lock">
+    Ensure the datasets directory has proper read permissions:
+    
+    ```bash
+    chmod -R 755 datasets/
+    ```
+  </Accordion>
+
+  <Accordion title="Container fails to start" icon="xmark">
+    Check the container logs for errors:
+    
+    ```bash
+    docker logs datawarehouse
+    ```
+    
+    Common issues include:
+    - Invalid environment variables in `.env`
+    - Insufficient Docker resources
+    - Corrupted Docker volumes (try `docker compose down -v`)
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  If you encounter persistent issues, try removing all containers and volumes, then start fresh:
+  
+  ```bash
+  docker compose down -v
+  docker compose up -d
+  ```
+</Warning>
+
+## Next Steps
+
+Now that your environment is set up, you can:
+
+1. Explore the [Docker Setup](/setup/docker-setup) for container management
+2. Learn about the [ETL Procedures](/pipeline/etl-procedures) for data transformation
+3. Review the [Data Model](/architecture/data-model) for analytics

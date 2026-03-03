@@ -1,0 +1,583 @@
+---
+title: ETL Procedure Documentation
+description: Comprehensive guide to stored procedures that orchestrate the data warehouse pipeline
+---
+
+The ETL (Extract, Transform, Load) procedures orchestrate data movement through the Bronze, Silver, and Gold layers. These stored procedures handle error management, logging, and ensure data consistency across the warehouse.
+
+## Overview
+
+The data warehouse pipeline uses two main stored procedures:
+
+<CardGroup cols={2}>
+  <Card title="bronze.load_bronze()" icon="database">
+    Extracts raw data from CSV files into Bronze tables
+  </Card>
+  <Card title="silver.load_silver()" icon="wand-magic-sparkles">
+    Transforms and cleanses Bronze data into Silver tables
+  </Card>
+</CardGroup>
+
+<Info>
+  The Gold layer uses views rather than procedures, automatically reflecting the latest Silver data when queried.
+</Info>
+
+## bronze.load_bronze()
+
+Loads raw data from CSV files into Bronze layer tables using PostgreSQL's COPY command.
+
+### Procedure Signature
+
+```sql
+CREATE OR REPLACE PROCEDURE bronze.load_bronze()
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+-- procedure body
+$$;
+```
+
+<AccordionGroup>
+  <Accordion title="Parameters" icon="sliders">
+    **None** - The procedure takes no parameters.
+    
+    All file paths and table names are hardcoded for consistency and security.
+  </Accordion>
+
+  <Accordion title="Security" icon="shield">
+    The procedure uses `SECURITY DEFINER` which means:
+    
+    <Warning>
+      The procedure executes with the privileges of the user who created it, not the user who calls it. This allows controlled access to COPY operations without granting file system permissions to all users.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Return Value" icon="arrow-turn-down-left">
+    Returns void. Status is communicated through RAISE NOTICE messages and exceptions.
+  </Accordion>
+</AccordionGroup>
+
+### Execution
+
+Execute the procedure using the CALL statement:
+
+```sql
+CALL bronze.load_bronze();
+```
+
+### Data Loading Process
+
+The procedure loads six tables in sequence:
+
+<Steps>
+  <Step title="CRM Customer Info">
+    ```sql
+    TRUNCATE TABLE bronze.crm_cust_info;
+    COPY bronze.crm_cust_info
+      FROM '/datasets/source_crm/cust_info.csv'
+      WITH (FORMAT csv, HEADER true);
+    ```
+  </Step>
+
+  <Step title="CRM Product Info">
+    ```sql
+    TRUNCATE TABLE bronze.crm_prd_info;
+    COPY bronze.crm_prd_info
+      FROM '/datasets/source_crm/prd_info.csv'
+      WITH (FORMAT csv, HEADER true);
+    ```
+  </Step>
+
+  <Step title="CRM Sales Details">
+    ```sql
+    TRUNCATE TABLE bronze.crm_sales_details;
+    COPY bronze.crm_sales_details
+      FROM '/datasets/source_crm/sales_details.csv'
+      WITH (FORMAT csv, HEADER true);
+    ```
+  </Step>
+
+  <Step title="ERP Customer Demographics">
+    ```sql
+    TRUNCATE TABLE bronze.erp_cust_az12;
+    COPY bronze.erp_cust_az12
+      FROM '/datasets/source_erp/CUST_AZ12.csv'
+      WITH (FORMAT csv, HEADER true);
+    ```
+  </Step>
+
+  <Step title="ERP Location Data">
+    ```sql
+    TRUNCATE TABLE bronze.erp_loc_a101;
+    COPY bronze.erp_loc_a101
+      FROM '/datasets/source_erp/LOC_A101.csv'    
+      WITH (FORMAT csv, HEADER true);
+    ```
+  </Step>
+
+  <Step title="ERP Product Categories">
+    ```sql
+    TRUNCATE TABLE bronze.erp_px_cat_g1v2;
+    COPY bronze.erp_px_cat_g1v2
+      FROM '/datasets/source_erp/PX_CAT_G1V2.csv'    
+      WITH (FORMAT csv, HEADER true);
+    ```
+  </Step>
+</Steps>
+
+### Output Example
+
+```
+NOTICE:  [14:23:45] load bronze started
+NOTICE:  Step [load bronze.crm_cust_info] started at 14:23:45
+NOTICE:  Step [load bronze.crm_cust_info] completed successfully (2 s)
+NOTICE:  Step [load bronze.crm_prd_info] completed successfully (1 s)
+NOTICE:  Step [load bronze.crm_sales_details] completed successfully (5 s)
+NOTICE:  Step [load bronze.erp_cust_az12] completed successfully (1 s)
+NOTICE:  Step [load bronze.erp_loc_a101] completed successfully (0 s)
+NOTICE:  Step [load bronze.erp_px_cat_g1v2] completed successfully (1 s)
+NOTICE:  [14:23:55] load bronze finished
+NOTICE:  load bronze finished in [10] seconds
+```
+
+## silver.load_silver()
+
+Transforms and cleanses data from Bronze tables into Silver tables.
+
+### Procedure Signature
+
+```sql
+CREATE OR REPLACE PROCEDURE silver.load_silver()
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+-- procedure body
+$$;
+```
+
+### Execution
+
+```sql
+CALL silver.load_silver();
+```
+
+### Transformation Process
+
+The procedure processes six tables with data quality transformations:
+
+<Tabs>
+  <Tab title="Customer Info">
+    **Transformations:**
+    - Deduplication using ROW_NUMBER window function
+    - Gender code expansion (M → Male, F → Female)
+    - Marital status expansion (S → Single, M → Married)
+    - String trimming
+    
+    ```sql
+    INSERT INTO silver.crm_cust_info (...)
+    SELECT
+      cst_id, 
+      trim(cst_key), 
+      trim(cst_firstname),
+      CASE upper(trim(cst_gndr)) 
+        WHEN 'M' THEN 'Male' 
+        WHEN 'F' THEN 'Female' 
+        ELSE 'n/a'
+      END as cst_gndr,
+      ...
+    FROM (
+      SELECT *, 
+        ROW_NUMBER() OVER (
+          PARTITION BY cst_id 
+          ORDER BY cst_create_date DESC
+        ) AS flag_last
+      FROM bronze.crm_cust_info
+    )
+    WHERE flag_last = 1;
+    ```
+  </Tab>
+
+  <Tab title="Product Info">
+    **Transformations:**
+    - Category ID extraction from product key
+    - Product line code expansion
+    - NULL cost handling (default to 0)
+    - End date calculation using LEAD window function
+    
+    ```sql
+    INSERT INTO silver.crm_prd_info(...)
+    SELECT 
+      prd_id,
+      replace(substring(trim(prd_key), 1, 5), '-','_') as cat_id,
+      substring(prd_key, 7, length(prd_key)) as prd_key,
+      prd_name,
+      coalesce(prd_cost, 0) as prd_cost,
+      CASE upper(trim(prd_line))
+        WHEN 'M' THEN 'Mountain'
+        WHEN 'R' THEN 'Road'
+        ...
+      END as prd_line,
+      lead(prd_start_dt) OVER (
+        PARTITION BY prd_key 
+        ORDER BY prd_start_dt
+      ) - 1 as prd_end_dt
+    FROM bronze.crm_prd_info;
+    ```
+  </Tab>
+
+  <Tab title="Sales Details">
+    **Transformations:**
+    - Integer to DATE conversion (YYYYMMDD → DATE)
+    - Date validation (NULL for invalid dates)
+    - Sales amount validation against quantity × price
+    - Price correction (handle negatives and NULLs)
+    
+    ```sql
+    SELECT 
+      sls_ord_num,
+      CASE
+        WHEN sls_ord_dt IS NULL
+          OR sls_ord_dt = 0
+          OR length(sls_ord_dt::text) != 8
+        THEN NULL
+        ELSE to_date(TRIM(sls_ord_dt::text), 'YYYYMMDD')
+      END AS sls_ord_dt,
+      CASE 
+        WHEN sls_sales != sls_quantity * abs(sls_price) 
+        THEN sls_quantity * abs(sls_price)
+        ELSE sls_sales
+      END as sls_sales,
+      ...
+    FROM bronze.crm_sales_details;
+    ```
+  </Tab>
+
+  <Tab title="ERP Tables">
+    **ERP Customer (erp_cust_az12):**
+    - Remove 'NAS' prefix from customer IDs
+    - Validate birth dates (no future dates)
+    - Standardize gender codes
+    
+    **ERP Location (erp_loc_a101):**
+    - Remove hyphens from customer IDs
+    - Standardize country codes (USA, CAN, DE, etc.)
+    
+    **ERP Categories (erp_px_cat_g1v2):**
+    - Minimal transformation (pass-through)
+  </Tab>
+</Tabs>
+
+### Output Example
+
+```
+NOTICE:  [14:24:00] load silver started
+NOTICE:  Step [load silver.crm_cust_info] completed successfully (3 s)
+NOTICE:  Step [load silver.crm_prd_info] completed successfully (2 s)
+NOTICE:  Step [load silver.crm_sales_details] completed successfully (8 s)
+NOTICE:  Step [load silver.erp_cust_az12] completed successfully (1 s)
+NOTICE:  Step [load silver.erp_loc_a101] completed successfully (1 s)
+NOTICE:  Step [load silver.erp_px_cat_g1v2] completed successfully (0 s)
+NOTICE:  load silver finished in [15] seconds
+```
+
+## Error Handling
+
+Both procedures implement comprehensive error handling:
+
+<CodeGroup>
+```sql Pattern
+BEGIN
+  DECLARE
+    v_start_date timestamp := clock_timestamp();
+  BEGIN
+    v_step := 'load bronze.crm_cust_info';
+    
+    -- Load operation
+    TRUNCATE TABLE bronze.crm_cust_info;
+    COPY bronze.crm_cust_info FROM '...';
+    
+    v_ok := v_ok + 1;
+    RAISE NOTICE 'Step [%] completed (%.0f s)',
+      v_step,
+      extract(epoch FROM (clock_timestamp() - v_start_date));
+      
+  EXCEPTION WHEN OTHERS THEN
+    v_err := v_err + 1;
+    v_msg := 'Error in step: ' || v_step || ' - ' || SQLERRM;
+    RAISE EXCEPTION '%', v_msg;
+  END;
+END;
+```
+
+```sql Example Error
+ERROR:  Error in step: load bronze.crm_cust_info - could not open file "/datasets/source_crm/cust_info.csv" for reading: No such file or directory
+```
+</CodeGroup>
+
+<AccordionGroup>
+  <Accordion title="Error Variables" icon="code">
+    Each procedure declares error tracking variables:
+    
+    - `v_step`: Current step being executed
+    - `v_ok`: Count of successful steps
+    - `v_err`: Count of failed steps
+    - `v_msg`: Error message text
+  </Accordion>
+
+  <Accordion title="Exception Handling" icon="triangle-exclamation">
+    When an error occurs:
+    
+    1. The `EXCEPTION WHEN OTHERS` block catches all errors
+    2. Error counter is incremented
+    3. Error message is constructed with step name and SQL error
+    4. Exception is re-raised to halt execution
+    5. Transaction is rolled back automatically
+    
+    <Warning>
+      If any step fails, the entire procedure fails and all changes are rolled back. This ensures data consistency.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Common Errors" icon="bug">
+    <Tabs>
+      <Tab title="File Not Found">
+        ```
+        Error: could not open file for reading: No such file or directory
+        ```
+        
+        **Solution:** Verify file path and file existence
+      </Tab>
+      
+      <Tab title="Permission Denied">
+        ```
+        Error: could not open file for reading: Permission denied
+        ```
+        
+        **Solution:** Check file permissions and PostgreSQL user access
+      </Tab>
+      
+      <Tab title="Data Type Mismatch">
+        ```
+        Error: invalid input syntax for type integer
+        ```
+        
+        **Solution:** Verify CSV data matches table schema
+      </Tab>
+      
+      <Tab title="Constraint Violation">
+        ```
+        Error: duplicate key value violates unique constraint
+        ```
+        
+        **Solution:** Check for duplicates in source data
+      </Tab>
+    </Tabs>
+  </Accordion>
+</AccordionGroup>
+
+## Logging and Monitoring
+
+Procedures provide detailed execution logging:
+
+### Timing Information
+
+<CodeGroup>
+```sql Start Time
+RAISE NOTICE '[%] load bronze started', 
+  to_char(clock_timestamp(), 'HH24:MI:SS');
+```
+
+```sql Step Duration
+RAISE NOTICE 'Step [%] completed successfully (%.0f s)',
+  v_step,
+  extract(epoch FROM (clock_timestamp() - v_start_date));
+```
+
+```sql Total Duration
+RAISE NOTICE 'load bronze finished in [%] seconds', 
+  extract(epoch FROM (v_end_batch - v_start_batch));
+```
+</CodeGroup>
+
+### Variables Used
+
+```sql
+DECLARE
+  v_step text;                                  -- Current step name
+  v_start_batch timestamp := clock_timestamp(); -- Batch start time
+  v_end_batch timestamp;                        -- Batch end time
+  v_ok int := 0;                               -- Success counter
+  v_err int := 0;                              -- Error counter
+  v_msg text;                                  -- Error message
+```
+
+<Info>
+  Monitor PostgreSQL logs or client output to track procedure execution and identify performance bottlenecks.
+</Info>
+
+## Permissions
+
+Both procedures grant execution permissions to all users:
+
+```sql
+GRANT EXECUTE ON PROCEDURE bronze.load_bronze() TO PUBLIC;
+GRANT USAGE ON SCHEMA bronze TO PUBLIC;
+
+GRANT EXECUTE ON PROCEDURE silver.load_silver() TO PUBLIC;
+GRANT USAGE ON SCHEMA silver TO PUBLIC;
+GRANT SELECT ON ALL TABLES IN SCHEMA silver TO PUBLIC;
+```
+
+<Warning>
+  While procedures are public, `SECURITY DEFINER` ensures they run with creator privileges. Review these permissions based on your security requirements.
+</Warning>
+
+## Complete Pipeline Execution
+
+To refresh the entire data warehouse:
+
+<Steps>
+  <Step title="Load Bronze Layer">
+    Extract raw data from source files:
+    
+    ```sql
+    CALL bronze.load_bronze();
+    ```
+    
+    Duration: ~10 seconds
+  </Step>
+
+  <Step title="Load Silver Layer">
+    Transform and cleanse data:
+    
+    ```sql
+    CALL silver.load_silver();
+    ```
+    
+    Duration: ~15 seconds
+  </Step>
+
+  <Step title="Query Gold Layer">
+    Analytics views automatically reflect updated data:
+    
+    ```sql
+    SELECT 
+        p.category,
+        SUM(f.sales_amount) as total_sales
+    FROM gold.fact_sales f
+    INNER JOIN gold.dim_product p 
+        ON f.product_key = p.product_key
+    GROUP BY p.category;
+    ```
+  </Step>
+</Steps>
+
+### Automation Script
+
+```sql
+-- Complete pipeline execution
+DO $$
+BEGIN
+  RAISE NOTICE 'Starting data warehouse refresh...';
+  
+  -- Bronze layer
+  CALL bronze.load_bronze();
+  RAISE NOTICE 'Bronze layer loaded successfully';
+  
+  -- Silver layer
+  CALL silver.load_silver();
+  RAISE NOTICE 'Silver layer loaded successfully';
+  
+  RAISE NOTICE 'Data warehouse refresh complete';
+END $$;
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Sequential Execution" icon="list-ol">
+    Always run procedures in order: Bronze → Silver → Gold queries
+  </Card>
+  
+  <Card title="Monitor Logs" icon="scroll">
+    Review NOTICE messages to track execution time and identify slow steps
+  </Card>
+  
+  <Card title="Test on Subset" icon="vial">
+    For development, test with smaller CSV files first
+  </Card>
+  
+  <Card title="Schedule Wisely" icon="calendar">
+    Run during low-usage periods to minimize user impact
+  </Card>
+  
+  <Card title="Backup Before Load" icon="floppy-disk">
+    Consider backing up Silver/Bronze before major refreshes
+  </Card>
+  
+  <Card title="Validate Results" icon="circle-check">
+    Query record counts after each load to verify data completeness
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Procedure Hangs" icon="hourglass">
+    **Symptoms:** Procedure doesn't complete or respond
+    
+    **Possible Causes:**
+    - Large file size
+    - Disk I/O bottleneck
+    - Lock contention
+    
+    **Solutions:**
+    - Check PostgreSQL locks: `SELECT * FROM pg_locks;`
+    - Monitor disk usage and I/O
+    - Increase statement timeout if needed
+  </Accordion>
+
+  <Accordion title="Partial Data Load" icon="triangle-exclamation">
+    **Symptoms:** Some tables loaded, others empty
+    
+    **Cause:** Procedure failed mid-execution
+    
+    **Solution:** 
+    - Check error messages in logs
+    - Verify all source files are present
+    - Re-run the procedure (TRUNCATE ensures clean reload)
+  </Accordion>
+
+  <Accordion title="Performance Degradation" icon="gauge">
+    **Symptoms:** Procedures taking longer than usual
+    
+    **Investigation:**
+    ```sql
+    -- Check table sizes
+    SELECT schemaname, tablename, 
+           pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename))
+    FROM pg_tables
+    WHERE schemaname IN ('bronze', 'silver')
+    ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+    ```
+    
+    **Solutions:**
+    - Vacuum and analyze tables
+    - Check for missing indexes
+    - Review CSV file sizes
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={3}>
+  <Card title="Bronze Layer" icon="database" href="/pipeline/bronze-layer">
+    Raw data ingestion details
+  </Card>
+  <Card title="Silver Layer" icon="wand-magic-sparkles" href="/pipeline/silver-layer">
+    Transformation logic reference
+  </Card>
+  <Card title="Gold Layer" icon="star" href="/pipeline/gold-layer">
+    Analytics model documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,487 @@
+---
+title: "Transformation Logic"
+description: "Data cleansing rules and transformations applied when loading data from Bronze to Silver layer"
+---
+
+The Silver layer applies comprehensive data quality rules and standardization transformations to raw Bronze data. All transformations are executed by the `silver.load_silver()` stored procedure.
+
+## CRM Transformations
+
+### Customer Information (crm_cust_info)
+
+Transformations applied to customer data include:
+
+<AccordionGroup>
+  <Accordion title="String Trimming" icon="scissors">
+    All string fields are trimmed to remove leading/trailing whitespace:
+    - Customer key
+    - First name
+    - Last name
+  </Accordion>
+
+  <Accordion title="Marital Status Standardization" icon="rings-wedding">
+    Single-character codes are expanded to full words:
+    
+    ```sql
+    case upper(trim(cst_marital_status)) 
+      WHEN 'S' THEN 'Single' 
+      WHEN 'M' THEN 'Married' 
+      else 'n/a'
+    END as cst_marital_status
+    ```
+    
+    - `'S'` → `'Single'`
+    - `'M'` → `'Married'`
+    - All other values → `'n/a'`
+  </Accordion>
+
+  <Accordion title="Gender Standardization" icon="venus-mars">
+    Single-character codes are expanded to full words:
+    
+    ```sql
+    case upper(trim(cst_gndr)) 
+      WHEN 'M' THEN 'Male' 
+      WHEN 'F' THEN 'Female' 
+      else 'n/a'
+    END as cst_gndr
+    ```
+    
+    - `'M'` → `'Male'`
+    - `'F'` → `'Female'`
+    - All other values → `'n/a'`
+  </Accordion>
+
+  <Accordion title="Deduplication" icon="filter">
+    Only the most recent record per customer is kept:
+    
+    ```sql
+    select *, 
+      ROW_NUMBER() OVER (PARTITION BY cst_id ORDER BY cst_create_date DESC) AS flag_last
+    FROM bronze.crm_cust_info
+    WHERE flag_last = 1
+    ```
+    
+    Uses window function to identify and select only the latest record based on `cst_create_date`.
+  </Accordion>
+</AccordionGroup>
+
+#### Complete Transformation SQL
+
+```sql
+truncate TABLE silver.crm_cust_info;
+insert into silver.crm_cust_info (
+  cst_id,
+  cst_key,
+  cst_firstname,
+  cst_lastname,
+  cst_marital_status,
+  cst_gndr,
+  cst_create_date
+) 
+select
+  cst_id, 
+  trim(cst_key), 
+  trim(cst_firstname) as cst_firstname, 
+  trim(cst_lastname) as cst_lastname, 
+  case upper(trim(cst_marital_status)) 
+    WHEN 'S' THEN 'Single' 
+    WHEN 'M' THEN 'Married' 
+    else 'n/a'
+  END as cst_marital_status, 
+  case upper(trim(cst_gndr)) 
+    WHEN 'M' THEN 'Male' 
+    WHEN 'F' THEN 'Female' 
+    else 'n/a'
+  END as cst_gndr,
+  cst_create_date 
+from (
+  select *, 
+    ROW_NUMBER() OVER (PARTITION BY cst_id ORDER BY cst_create_date DESC) AS flag_last
+  FROM bronze.crm_cust_info)
+WHERE flag_last = 1;
+```
+
+---
+
+### Product Information (crm_prd_info)
+
+Transformations applied to product data:
+
+<AccordionGroup>
+  <Accordion title="Category ID Extraction" icon="tag">
+    Category ID is extracted from the product key and formatted:
+    
+    ```sql
+    replace(substring(trim(prd_key), 1, 5), '-','_') as cat_id
+    ```
+    
+    - Takes first 5 characters of product key
+    - Replaces hyphens with underscores
+    - Example: `'AR-12'` → `'AR_12'`
+  </Accordion>
+
+  <Accordion title="Product Key Parsing" icon="key">
+    Product key is extracted from position 7 onwards:
+    
+    ```sql
+    substring(prd_key, 7, length(prd_key)) as prd_key
+    ```
+  </Accordion>
+
+  <Accordion title="Cost Null Handling" icon="dollar-sign">
+    Null costs are replaced with 0:
+    
+    ```sql
+    coalesce(prd_cost, 0) as prd_cost
+    ```
+  </Accordion>
+
+  <Accordion title="Product Line Standardization" icon="route">
+    Single-character product line codes are expanded:
+    
+    ```sql
+    case upper(trim(prd_line))
+      when 'M' then 'Mountain'
+      when 'R' then 'Road'
+      when 'S' then 'Other sales'
+      when 'T' then 'Touring'
+      else 'n/a'
+    end as prd_line
+    ```
+    
+    - `'M'` → `'Mountain'`
+    - `'R'` → `'Road'`
+    - `'S'` → `'Other sales'`
+    - `'T'` → `'Touring'`
+    - All other values → `'n/a'`
+  </Accordion>
+
+  <Accordion title="End Date Calculation" icon="calendar">
+    Product end date is calculated using the next product's start date:
+    
+    ```sql
+    lead(prd_start_dt) over (partition by prd_key order by prd_start_dt)-1 as prd_end_dt
+    ```
+    
+    Uses LEAD window function to get the next version's start date minus 1 day.
+  </Accordion>
+</AccordionGroup>
+
+#### Complete Transformation SQL
+
+```sql
+truncate table silver.crm_prd_info;
+insert into silver.crm_prd_info(
+  prd_id,
+  cat_id,
+  prd_key,
+  prd_name,
+  prd_cost,
+  prd_line,
+  prd_start_dt,
+  prd_end_dt
+) 
+SELECT prd_id,
+  replace(substring(trim(prd_key), 1, 5), '-','_') as cat_id,
+  substring(prd_key, 7, length(prd_key)) as prd_key,
+  prd_name,
+  coalesce(prd_cost, 0) as prd_cost,
+  case upper(trim(prd_line))
+    when 'M' then 'Mountain'
+    when 'R' then 'Road'
+    when 'S' then 'Other sales'
+    when 'T' then 'Touring'
+    else 'n/a'
+  end as prd_line,
+  prd_start_dt,
+  lead(prd_start_dt) over (partition by prd_key order by prd_start_dt)-1 as prd_end_dt
+FROM bronze.crm_prd_info;
+```
+
+---
+
+### Sales Details (crm_sales_details)
+
+Comprehensive data quality checks and corrections for sales transactions:
+
+<AccordionGroup>
+  <Accordion title="Date Validation & Conversion" icon="calendar-check">
+    All date fields are validated before conversion from YYYYMMDD format:
+    
+    ```sql
+    CASE
+      WHEN sls_ord_dt IS NULL
+        OR sls_ord_dt = 0
+        OR length(sls_ord_dt::text) != 8
+      THEN NULL
+      ELSE to_date(TRIM(sls_ord_dt::text), 'YYYYMMDD')
+    END AS sls_ord_dt
+    ```
+    
+    Checks applied:
+    - Not null
+    - Not zero
+    - Exactly 8 characters
+    - If invalid, set to NULL
+    
+    Applied to: `sls_ord_dt`, `sls_ship_dt`, `sls_due_dt`
+  </Accordion>
+
+  <Accordion title="Sales Amount Correction" icon="calculator">
+    Sales amount is recalculated if inconsistent:
+    
+    ```sql
+    case 
+      when sls_sales is null 
+        or sls_sales <= 0 
+        or sls_sales != sls_quantity * abs(sls_price) 
+      then sls_quantity * abs(sls_price)
+      else sls_sales
+    end as sls_sales
+    ```
+    
+    Recalculates when:
+    - Sales is null
+    - Sales is zero or negative
+    - Sales doesn't match `quantity × price`
+  </Accordion>
+
+  <Accordion title="Price Validation & Correction" icon="money-bill">
+    Unit price is validated and corrected:
+    
+    ```sql
+    case 
+      when sls_price is null 
+        or sls_price < 0 
+        or sls_price = 0 
+      then sls_sales / abs(sls_quantity)
+      when sls_price < 0 
+        then abs(sls_price)
+      else sls_price
+    end as sls_price
+    ```
+    
+    Logic:
+    - If price is null/zero/negative: derive from `sales ÷ quantity`
+    - If price is negative: convert to absolute value
+    - Otherwise: use original price
+  </Accordion>
+</AccordionGroup>
+
+#### Complete Transformation SQL
+
+```sql
+truncate table silver.crm_sales_details;
+insert into silver.crm_sales_details (
+  sls_ord_num,
+  sls_prd_key,
+  sls_cust_id,
+  sls_ord_dt,
+  sls_ship_dt,
+  sls_due_dt,
+  sls_sales,
+  sls_quantity,
+  sls_price
+) 
+select sls_ord_num,
+  sls_prd_key,
+  sls_cust_id,
+  CASE
+    WHEN sls_ord_dt IS NULL
+      OR sls_ord_dt = 0
+      OR length(sls_ord_dt::text) != 8
+    THEN NULL
+    ELSE to_date(TRIM(sls_ord_dt::text), 'YYYYMMDD')
+  END AS sls_ord_dt,
+  case 
+    when sls_ship_dt is null
+      or sls_ship_dt = 0
+      or length(sls_ship_dt::text) != 8        
+    then null
+    else to_date(TRIM(sls_ship_dt::text), 'YYYYMMDD')
+  end as sls_ship_dt,
+  case
+    when sls_due_dt is null 
+      or sls_due_dt = 0
+      or length(sls_due_dt::text) != 8 
+    then null
+    else to_date(sls_due_dt::text, 'YYYYMMDD')
+  end as sls_due_dt,
+  case 
+    when sls_sales is null or sls_sales <= 0 or sls_sales != sls_quantity * abs(sls_price) 
+    then sls_quantity * abs(sls_price)
+    else sls_sales
+  end as sls_sales,
+  sls_quantity,
+  case 
+    when sls_price is null 
+      or sls_price < 0 
+      or sls_price = 0 
+    then sls_sales / abs(sls_quantity)
+    when sls_price < 0 
+      then abs(sls_price)
+    else sls_price
+  end as sls_price
+from bronze.crm_sales_details;
+```
+
+---
+
+## ERP Transformations
+
+### ERP Customer Data (erp_cust_az12)
+
+<AccordionGroup>
+  <Accordion title="Customer ID Cleaning" icon="id-card">
+    Removes 'NAS' prefix from customer IDs:
+    
+    ```sql
+    case 
+      when cid like 'NAS%' then substring(cid, 4, length(cid))
+      else cid
+    end as cid
+    ```
+  </Accordion>
+
+  <Accordion title="Birth Date Validation" icon="cake-candles">
+    Rejects future birth dates:
+    
+    ```sql
+    case 
+      when bdate > current_date then null
+      else bdate
+    end as bdate
+    ```
+  </Accordion>
+
+  <Accordion title="Gender Standardization" icon="venus-mars">
+    Standardizes gender values (handles multiple formats):
+    
+    ```sql
+    case 
+      when upper(trim(gen)) in ('F', 'FEMALE') then 'Female'
+      when upper(trim(gen)) in ('M', 'MALE') then 'Male'
+      else 'n/a'
+    end as gen
+    ```
+    
+    - `'F'` or `'FEMALE'` → `'Female'`
+    - `'M'` or `'MALE'` → `'Male'`
+    - All other values → `'n/a'`
+  </Accordion>
+</AccordionGroup>
+
+```sql
+truncate table silver.erp_cust_az12;
+insert into silver.erp_cust_az12 (cid, bdate, gen) 
+select 
+  case 
+    when cid like 'NAS%' then substring(cid, 4, length(cid))
+    else cid
+  end as cid,
+  case 
+    when bdate > current_date then null
+    else bdate
+  end as bdate,
+  case 
+    when upper(trim(gen)) in ('F', 'FEMALE') then 'Female'
+    when upper(trim(gen)) in ('M', 'MALE') then 'Male'
+    else 'n/a'
+  end as gen
+from bronze.erp_cust_az12;
+```
+
+---
+
+### ERP Location Data (erp_loc_a101)
+
+<AccordionGroup>
+  <Accordion title="Customer ID Formatting" icon="id-card">
+    Removes hyphens from customer IDs:
+    
+    ```sql
+    replace(cid, '-', '') as cid
+    ```
+  </Accordion>
+
+  <Accordion title="Country Name Standardization" icon="globe">
+    Expands country codes to full names:
+    
+    ```sql
+    case 
+      when trim(cntry) in ('USA','US') then 'United States'
+      when trim(cntry) = 'CAN' then 'Canada'
+      when trim(cntry) = 'DE' then 'Germany'
+      when trim(cntry) = '' or trim(cntry) is null then 'n/a'
+      else trim(cntry)
+    end as cntry
+    ```
+    
+    - `'USA'`, `'US'` → `'United States'`
+    - `'CAN'` → `'Canada'`
+    - `'DE'` → `'Germany'`
+    - Empty/null → `'n/a'`
+    - Other values passed through (trimmed)
+  </Accordion>
+</AccordionGroup>
+
+```sql
+truncate table silver.erp_loc_a101;
+insert into silver.erp_loc_a101 
+select 
+  replace(cid, '-', '') as cid,
+  case 
+    when trim(cntry) in ('USA','US') then 'United States'
+    when trim(cntry) = 'CAN' then 'Canada'
+    when trim(cntry) = 'DE' then 'Germany'
+    when trim(cntry) = '' or trim(cntry) is null then 'n/a'
+    else trim(cntry)
+  end as cntry
+from bronze.erp_loc_a101;
+```
+
+---
+
+### ERP Product Category (erp_px_cat_g1v2)
+
+Minimal transformation - data is loaded as-is from Bronze:
+
+```sql
+truncate table silver.erp_px_cat_g1v2;
+insert into silver.erp_px_cat_g1v2 (
+  id,
+  cat,
+  subcat,
+  manteinance
+)
+select 
+  id,
+  cat,
+  subcat,
+  manteinance
+from bronze.erp_px_cat_g1v2;
+```
+
+<Note>
+No transformations are applied to this table - data quality is assumed to be high in the source system.
+</Note>
+
+---
+
+## Execution
+
+All transformations are executed via the stored procedure:
+
+```sql
+call silver.load_silver();
+```
+
+The procedure:
+- Truncates each Silver table before loading
+- Processes tables sequentially with error handling
+- Logs execution time for each step
+- Grants public access to the schema and tables upon completion
+
+<Warning>
+All Silver tables are **truncated and reloaded** on each execution. This is a full refresh pattern, not incremental.
+</Warning>

@@ -1,0 +1,382 @@
+---
+title: Docker Configuration
+description: Complete guide to Docker and Docker Compose configuration for the SQL Data Warehouse
+---
+
+This project uses Docker to containerize the PostgreSQL database, making it easy to set up, run, and tear down the data warehouse environment.
+
+## Docker Compose Overview
+
+<Info>
+  Docker Compose allows you to define and run the PostgreSQL container with all necessary configurations in a single YAML file.
+</Info>
+
+### Configuration File
+
+The `docker-compose.yml` file defines the complete Docker setup:
+
+```yaml docker-compose.yml
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: datawarehouse
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+      PGDATA:            /var/lib/postgresql/data/pgdata
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./datasets:/datasets:ro
+volumes:
+  pg_data:
+```
+
+## Configuration Breakdown
+
+<AccordionGroup>
+  <Accordion title="Service Configuration" icon="gears">
+    **Service Name**: `db`
+    
+    The main database service with the following settings:
+    
+    - **Image**: `postgres:16-alpine` - Uses PostgreSQL 16 on Alpine Linux for a lightweight container
+    - **Container Name**: `datawarehouse` - Fixed name for easy reference
+    - **Restart Policy**: `unless-stopped` - Automatically restarts unless manually stopped
+  </Accordion>
+
+  <Accordion title="Environment Variables" icon="key">
+    The container uses environment variables from your `.env` file:
+    
+    | Variable | Description |
+    |----------|-------------|
+    | `POSTGRES_USER` | PostgreSQL superuser name |
+    | `POSTGRES_PASSWORD` | Password for the superuser |
+    | `POSTGRES_DB` | Default database name |
+    | `PGDATA` | Data directory path inside container |
+    
+    <Tip>
+      These variables are loaded from the `.env` file in your project root directory.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Port Mappings" icon="network-wired">
+    **Port Configuration**: `5432:5432`
+    
+    - **Host Port**: `5432` - The port on your local machine
+    - **Container Port**: `5432` - PostgreSQL's default port inside the container
+    
+    This allows you to connect to the database using:
+    ```
+    Host: localhost
+    Port: 5432
+    Database: datawarehouse
+    Username: warehouse_admin
+    Password: <your_password>
+    ```
+    
+    <Warning>
+      If you have another PostgreSQL instance running on port 5432, change the host port to avoid conflicts (e.g., `5433:5432`).
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Volume Mounts" icon="box">
+    Two volumes are configured:
+    
+    ### 1. Persistent Data Volume
+    ```yaml
+    - pg_data:/var/lib/postgresql/data
+    ```
+    
+    - **Named Volume**: `pg_data` (defined in the `volumes:` section)
+    - **Purpose**: Persists database data even when the container is removed
+    - **Location**: Managed by Docker
+    
+    ### 2. Datasets Volume
+    ```yaml
+    - ./datasets:/datasets:ro
+    ```
+    
+    - **Bind Mount**: Maps local `./datasets` directory to `/datasets` in container
+    - **Mode**: `:ro` (read-only) - Prevents accidental modification of source data
+    - **Purpose**: Makes CSV files accessible to PostgreSQL for data import
+    
+    <Check>
+      The read-only mount ensures your source CSV files remain unchanged during ETL operations.
+    </Check>
+  </Accordion>
+</AccordionGroup>
+
+## Container Management
+
+### Starting the Container
+
+<CodeGroup>
+```bash Start in Background
+docker compose up -d
+```
+
+```bash Start with Logs
+docker compose up
+```
+
+```bash Rebuild and Start
+docker compose up -d --build
+```
+</CodeGroup>
+
+<Tip>
+  Use `-d` (detached mode) to run containers in the background, or omit it to see real-time logs.
+</Tip>
+
+### Stopping the Container
+
+<CodeGroup>
+```bash Stop Containers
+docker compose stop
+```
+
+```bash Stop and Remove
+docker compose down
+```
+
+```bash Remove with Volumes
+docker compose down -v
+```
+</CodeGroup>
+
+<Warning>
+  **Caution**: `docker compose down -v` will delete all database data. Only use this when you want to start completely fresh.
+</Warning>
+
+### Viewing Container Status
+
+```bash
+# List running containers
+docker ps
+
+# View container logs
+docker logs datawarehouse
+
+# Follow logs in real-time
+docker logs -f datawarehouse
+
+# View container resource usage
+docker stats datawarehouse
+```
+
+## Database Access
+
+### Direct PostgreSQL Access
+
+Connect to the PostgreSQL prompt inside the container:
+
+```bash
+docker exec -it datawarehouse psql -U warehouse_admin -d datawarehouse
+```
+
+<Note>
+  Replace `warehouse_admin` with your `POSTGRES_USER` value from the `.env` file.
+</Note>
+
+### Running SQL Scripts
+
+Execute SQL scripts from the host machine:
+
+```bash
+# Run a single script
+docker exec -i datawarehouse psql -U warehouse_admin -d datawarehouse < scripts/bronze/create_tables.sql
+
+# Run a script from inside the container
+docker exec -it datawarehouse psql -U warehouse_admin -d datawarehouse -f /scripts/bronze/load_data.sql
+```
+
+### External Database Connections
+
+Connect using your favorite database client:
+
+<CardGroup cols={2}>
+  <Card title="pgAdmin" icon="database">
+    - Host: `localhost`
+    - Port: `5432`
+    - Database: `datawarehouse`
+    - Username: From `.env`
+    - Password: From `.env`
+  </Card>
+  
+  <Card title="DBeaver" icon="table">
+    - Connection Type: PostgreSQL
+    - Server: `localhost`
+    - Port: `5432`
+    - Database: `datawarehouse`
+    - Authentication: Database Native
+  </Card>
+</CardGroup>
+
+## Volume Management
+
+### Inspecting Volumes
+
+```bash
+# List all volumes
+docker volume ls
+
+# Inspect the pg_data volume
+docker volume inspect <project>_pg_data
+
+# View volume usage
+docker system df -v
+```
+
+### Backup and Restore
+
+<Tabs>
+  <Tab title="Backup">
+    Create a backup of your database:
+    
+    ```bash
+    docker exec datawarehouse pg_dump -U warehouse_admin datawarehouse > backup.sql
+    ```
+    
+    Or create a compressed backup:
+    
+    ```bash
+    docker exec datawarehouse pg_dump -U warehouse_admin datawarehouse | gzip > backup.sql.gz
+    ```
+  </Tab>
+  
+  <Tab title="Restore">
+    Restore from a backup file:
+    
+    ```bash
+    docker exec -i datawarehouse psql -U warehouse_admin datawarehouse < backup.sql
+    ```
+    
+    Or restore from compressed backup:
+    
+    ```bash
+    gunzip -c backup.sql.gz | docker exec -i datawarehouse psql -U warehouse_admin datawarehouse
+    ```
+  </Tab>
+</Tabs>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Container won't start" icon="circle-exclamation">
+    **Check the logs**:
+    ```bash
+    docker logs datawarehouse
+    ```
+    
+    Common causes:
+    - Missing or invalid `.env` file
+    - Port 5432 already in use
+    - Insufficient Docker resources
+    - Corrupted volume data
+  </Accordion>
+
+  <Accordion title="Cannot connect to database" icon="plug">
+    **Verify the container is running**:
+    ```bash
+    docker ps | grep datawarehouse
+    ```
+    
+    **Test the connection**:
+    ```bash
+    docker exec -it datawarehouse pg_isready -U warehouse_admin
+    ```
+    
+    **Check network connectivity**:
+    ```bash
+    nc -zv localhost 5432
+    ```
+  </Accordion>
+
+  <Accordion title="Datasets not accessible" icon="folder-xmark">
+    **Verify the mount**:
+    ```bash
+    docker exec -it datawarehouse ls -la /datasets
+    ```
+    
+    **Check local directory permissions**:
+    ```bash
+    ls -la datasets/
+    chmod -R 755 datasets/
+    ```
+  </Accordion>
+
+  <Accordion title="Out of disk space" icon="hard-drive">
+    **Clean up unused resources**:
+    ```bash
+    # Remove unused containers, networks, and images
+    docker system prune
+    
+    # Remove unused volumes (caution!)
+    docker volume prune
+    
+    # View disk usage
+    docker system df
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Advanced Configuration
+
+### Custom PostgreSQL Configuration
+
+To use a custom PostgreSQL configuration file:
+
+1. Create a `postgresql.conf` file in your project root
+2. Add a volume mount in `docker-compose.yml`:
+
+```yaml
+volumes:
+  - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+```
+
+3. Update the command to use the custom config:
+
+```yaml
+command: postgres -c config_file=/etc/postgresql/postgresql.conf
+```
+
+### Performance Tuning
+
+Optimize PostgreSQL for data warehousing by adding environment variables:
+
+```yaml
+environment:
+  POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+  POSTGRES_HOST_AUTH_METHOD: trust  # Development only!
+```
+
+<Warning>
+  Never use `POSTGRES_HOST_AUTH_METHOD: trust` in production environments.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="ETL Pipeline" icon="arrow-progress" href="/etl/overview">
+    Learn how to extract, transform, and load data
+  </Card>
+  
+  <Card title="Data Model" icon="diagram-project" href="/data-model/star-schema">
+    Explore the star schema and analytics model
+  </Card>
+  
+  <Card title="SQL Scripts" icon="file-code" href="/scripts/bronze">
+    Dive into the Bronze, Silver, and Gold layer scripts
+  </Card>
+  
+  <Card title="Testing" icon="vial" href="/testing/data-quality">
+    Set up data quality tests and validation
+  </Card>
+</CardGroup>

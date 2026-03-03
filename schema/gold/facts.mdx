@@ -1,0 +1,206 @@
+---
+title: Fact Tables
+description: Gold layer fact table for sales transaction analytics
+---
+
+The Gold layer fact tables contain quantitative business metrics and foreign keys to dimension tables. These views provide the foundation for aggregated analytics and reporting.
+
+## gold.fact_sales
+
+The sales fact table contains transactional sales data at the order line item level. Each row represents a single product sold to a customer as part of an order.
+
+### View Definition
+
+```sql
+create view gold.fact_sales as
+select
+    si.sls_ord_num as order_number,
+    pr.product_key,
+    cu.customer_key,
+    si.sls_ord_dt as order_date,
+    si.sls_ship_dt as shipphing_date,
+    si.sls_sales as sales_amount,
+    si.sls_quantity as quantity,
+    si.sls_price as price
+from silver.crm_sales_details si
+left join gold.dim_product pr
+    on si.sls_prd_key = pr.product_number
+left join gold.dim_customer cu
+    on si.sls_cust_id = cu.customer_id;
+```
+
+### Fact Table Grain
+
+The grain of this fact table is **one row per order line item**:
+- Each unique combination of `order_number` and `product_key` represents a distinct line item
+- Multiple products in the same order will create multiple rows
+- The same customer can appear in multiple rows across different orders
+
+<Info>
+  **Grain Definition**: One row = One product sold in one order to one customer
+</Info>
+
+### Dimension Relationships
+
+This fact table connects to two dimensions:
+
+<CardGroup cols={2}>
+  <Card title="Customer Dimension" icon="user">
+    Joined via `customer_id` to `gold.dim_customer` to get the surrogate `customer_key`
+  </Card>
+  <Card title="Product Dimension" icon="box">
+    Joined via `product_number` to `gold.dim_product` to get the surrogate `product_key`
+  </Card>
+</CardGroup>
+
+### Fields
+
+#### Degenerate Dimension
+
+<ParamField path="order_number" type="string" required>
+  Sales order number from the CRM system. Acts as a degenerate dimension - an identifier stored in the fact table rather than in a separate dimension.
+</ParamField>
+
+#### Foreign Keys
+
+<ParamField path="product_key" type="integer">
+  Foreign key to `gold.dim_product`. Surrogate key derived by joining on `product_number`. May be null if product is no longer in the active catalog.
+</ParamField>
+
+<ParamField path="customer_key" type="integer">
+  Foreign key to `gold.dim_customer`. Surrogate key derived by joining on `customer_id`.
+</ParamField>
+
+#### Date Attributes
+
+<ParamField path="order_date" type="date" required>
+  Date when the sales order was placed. Key dimension for time-series analysis and period comparisons.
+</ParamField>
+
+<ParamField path="shipphing_date" type="date">
+  Date when the order was shipped. Used to calculate fulfillment time and shipping metrics. Note: field name preserved from source system.
+</ParamField>
+
+#### Measures
+
+<ParamField path="sales_amount" type="decimal" required>
+  Total sales revenue for this line item. This is the primary additive measure for revenue calculations.
+</ParamField>
+
+<ParamField path="quantity" type="integer" required>
+  Number of units sold for this product in this order line. Additive measure for volume analysis.
+</ParamField>
+
+<ParamField path="price" type="decimal" required>
+  Unit price for the product on this order. This is a semi-additive measure (averaging is more appropriate than summing).
+</ParamField>
+
+---
+
+## Measure Types
+
+Understanding measure additivity is crucial for accurate aggregations:
+
+<AccordionGroup>
+  <Accordion title="Additive Measures" icon="plus">
+    **sales_amount** and **quantity** are fully additive - they can be summed across all dimensions (customer, product, time).
+    
+    ```sql
+    -- Valid aggregation
+    select sum(sales_amount), sum(quantity)
+    from gold.fact_sales;
+    ```
+  </Accordion>
+  
+  <Accordion title="Semi-Additive Measures" icon="divide">
+    **price** should not be summed across multiple rows. Use averages or weighted calculations instead.
+    
+    ```sql
+    -- Correct approach
+    select avg(price) as avg_price
+    from gold.fact_sales
+    where product_key = 123;
+    
+    -- Weighted average price
+    select 
+        sum(sales_amount) / sum(quantity) as weighted_avg_price
+    from gold.fact_sales;
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Usage Examples
+
+### Sales by Customer
+
+```sql
+select 
+    c.customer_number,
+    c.first_name,
+    c.last_name,
+    count(distinct f.order_number) as total_orders,
+    sum(f.quantity) as total_units,
+    sum(f.sales_amount) as total_revenue
+from gold.fact_sales f
+join gold.dim_customer c on f.customer_key = c.customer_key
+group by c.customer_number, c.first_name, c.last_name
+order by total_revenue desc
+limit 10;
+```
+
+### Sales by Product Category
+
+```sql
+select 
+    p.category,
+    p.subcategory,
+    sum(f.sales_amount) as revenue,
+    sum(f.quantity) as units_sold,
+    count(distinct f.order_number) as order_count
+from gold.fact_sales f
+join gold.dim_product p on f.product_key = p.product_key
+group by p.category, p.subcategory
+order by revenue desc;
+```
+
+### Monthly Sales Trends
+
+```sql
+select 
+    date_trunc('month', order_date) as month,
+    sum(sales_amount) as monthly_revenue,
+    sum(quantity) as monthly_units,
+    count(distinct order_number) as monthly_orders
+from gold.fact_sales
+where order_date >= '2024-01-01'
+group by date_trunc('month', order_date)
+order by month;
+```
+
+### Fulfillment Time Analysis
+
+```sql
+select 
+    p.category,
+    avg(shipphing_date - order_date) as avg_days_to_ship,
+    count(*) as order_lines
+from gold.fact_sales f
+join gold.dim_product p on f.product_key = p.product_key
+where shipphing_date is not null
+group by p.category
+order by avg_days_to_ship desc;
+```
+
+---
+
+## Data Quality Considerations
+
+<Warning>
+  **Null Foreign Keys**: The `product_key` may be null if a product has been discontinued (`prd_end_dt IS NOT NULL`) since it won't appear in `gold.dim_product`. Consider this when performing inner joins.
+</Warning>
+
+<Tip>
+  Use LEFT JOINs when joining to dimensions if you need to preserve all fact records, even when dimension records are missing.
+</Tip>

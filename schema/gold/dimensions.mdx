@@ -1,0 +1,195 @@
+---
+title: Dimension Tables
+description: Gold layer dimension tables for customer and product analytics
+---
+
+The Gold layer contains business-friendly dimension tables that provide descriptive context for fact tables. These views are built from conformed Silver layer data and serve as the foundation for analytical queries.
+
+## gold.dim_customer
+
+The customer dimension provides a complete view of customer master data, combining CRM and ERP sources to create a single, authoritative customer record.
+
+### View Definition
+
+```sql
+create view gold.dim_customer as 
+select 
+    ROW_NUMBER() over (order by cst_id) as customer_key,
+    ci.cst_id as customer_id,
+    ci.cst_key as customer_number,
+    ci.cst_firstname as first_name,
+    ci.cst_lastname as last_name,
+    ci.cst_marital_status as marital_status,
+    case 
+        when ci.cst_gndr !='n/a' then ci.cst_gndr 
+        else coalesce(ca.gen, 'n/a') 
+    end as gender,
+    ca.bdate as birth_date,
+    ci.cst_create_date as create_date
+from silver.crm_cust_info ci
+left join silver.erp_cust_az12 ca
+    on ci.cst_key = ca.cid
+left join silver.erp_loc_a101 la
+    on ci.cst_key = la.cid;
+```
+
+### Business Key
+
+The dimension uses a composite business key strategy:
+- **customer_number** (`cst_key`): Natural business identifier from source systems
+- **customer_id** (`cst_id`): System-generated identifier
+- **customer_key**: Surrogate key generated via `ROW_NUMBER()` for join optimization
+
+### Fields
+
+<ParamField path="customer_key" type="integer" required>
+  Surrogate key generated using ROW_NUMBER() ordered by customer_id. Used for efficient joins with fact tables.
+</ParamField>
+
+<ParamField path="customer_id" type="string" required>
+  System-generated customer identifier from the CRM system (cst_id). Primary business key.
+</ParamField>
+
+<ParamField path="customer_number" type="string" required>
+  Natural business key (cst_key) used across CRM and ERP systems for customer identification.
+</ParamField>
+
+<ParamField path="first_name" type="string">
+  Customer's first name from CRM customer information.
+</ParamField>
+
+<ParamField path="last_name" type="string">
+  Customer's last name from CRM customer information.
+</ParamField>
+
+<ParamField path="marital_status" type="string">
+  Customer's marital status code from CRM records.
+</ParamField>
+
+<ParamField path="gender" type="string">
+  Customer gender with fallback logic: uses CRM gender if available and not 'n/a', otherwise falls back to ERP gender, defaulting to 'n/a' if unavailable.
+</ParamField>
+
+<ParamField path="birth_date" type="date">
+  Customer's date of birth from ERP customer records (erp_cust_az12).
+</ParamField>
+
+<ParamField path="create_date" type="timestamp">
+  Timestamp when the customer record was created in the CRM system.
+</ParamField>
+
+---
+
+## gold.dim_product
+
+The product dimension contains current product catalog information, including category hierarchies and cost data. This view excludes discontinued products (where `prd_end_dt` is not null).
+
+### View Definition
+
+```sql
+create view gold.dim_product as
+select
+    row_number() over (order by pn.prd_start_dt, pn.prd_key) as product_key,
+    pn.prd_id as product_id,
+    pn.prd_key as product_number,
+    pn.prd_name as product_name,
+    pn.cat_id as category_id,
+    pc.cat as category,
+    pc.subcat as subcategory,
+    pc.manteinance,
+    pn.prd_cost as product_cost,
+    pn.prd_line as product_line,
+    pn.prd_start_dt as product_start_date
+from silver.crm_prd_info pn
+left join silver.erp_px_cat_g1v2 pc
+    on pn.cat_id = pc.id
+where pn.prd_end_dt is null;
+```
+
+### Business Key
+
+The dimension uses multiple identifiers:
+- **product_number** (`prd_key`): Natural business identifier from product master data
+- **product_id** (`prd_id`): System-generated product identifier
+- **product_key**: Surrogate key generated via `ROW_NUMBER()` for join optimization
+
+### Data Filter
+
+<Info>
+  This view only includes **active products** where `prd_end_dt IS NULL`. Discontinued products are excluded from analytical queries.
+</Info>
+
+### Fields
+
+<ParamField path="product_key" type="integer" required>
+  Surrogate key generated using ROW_NUMBER() ordered by product_start_date and product_number. Used for efficient joins with fact tables.
+</ParamField>
+
+<ParamField path="product_id" type="string" required>
+  System-generated product identifier from the CRM product catalog.
+</ParamField>
+
+<ParamField path="product_number" type="string" required>
+  Natural business key (prd_key) used across systems for product identification.
+</ParamField>
+
+<ParamField path="product_name" type="string">
+  Descriptive product name from the CRM product catalog.
+</ParamField>
+
+<ParamField path="category_id" type="string">
+  Foreign key to the product category hierarchy (links to erp_px_cat_g1v2).
+</ParamField>
+
+<ParamField path="category" type="string">
+  Top-level product category name from ERP category master data.
+</ParamField>
+
+<ParamField path="subcategory" type="string">
+  Secondary level product category for more granular classification.
+</ParamField>
+
+<ParamField path="manteinance" type="string">
+  Maintenance classification or flag from the ERP category data.
+</ParamField>
+
+<ParamField path="product_cost" type="decimal">
+  Standard cost of the product from CRM product records.
+</ParamField>
+
+<ParamField path="product_line" type="string">
+  Product line grouping for portfolio management and reporting.
+</ParamField>
+
+<ParamField path="product_start_date" type="date">
+  Date when the product became available in the catalog.
+</ParamField>
+
+---
+
+## Usage Examples
+
+### Customer Demographics Analysis
+
+```sql
+select 
+    gender,
+    marital_status,
+    count(*) as customer_count
+from gold.dim_customer
+group by gender, marital_status
+order by customer_count desc;
+```
+
+### Product Category Breakdown
+
+```sql
+select 
+    category,
+    subcategory,
+    count(*) as product_count,
+    avg(product_cost) as avg_cost
+from gold.dim_product
+group by category, subcategory
+order by category, subcategory;
+```

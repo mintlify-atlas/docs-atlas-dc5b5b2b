@@ -1,0 +1,508 @@
+---
+title: Data Validation Processes
+description: Data quality rules and validation processes applied during Silver layer transformations
+---
+
+## Overview
+
+Data validation is a critical component of the ETL process, ensuring that data is accurate, consistent, and fit for purpose before it enters the dimensional model. Our validation approach focuses on cleaning, standardizing, and validating data during the Bronze-to-Silver transformation.
+
+<Info>
+  All validation rules are applied within the `silver.load_silver()` stored procedure during the ETL process.
+</Info>
+
+## Validation Categories
+
+<CardGroup cols={3}>
+  <Card title="Format Validation" icon="text">
+    Trimming whitespace, standardizing formats
+  </Card>
+  <Card title="Data Standardization" icon="list-check">
+    Converting codes to readable values
+  </Card>
+  <Card title="Null Handling" icon="circle-xmark">
+    Managing missing or invalid data
+  </Card>
+  <Card title="Deduplication" icon="filter">
+    Removing duplicate records
+  </Card>
+  <Card title="Date Validation" icon="calendar-check">
+    Parsing and validating date formats
+  </Card>
+  <Card title="Business Rules" icon="scale-balanced">
+    Enforcing logical constraints
+  </Card>
+</CardGroup>
+
+## Customer Information Validation
+
+### CRM Customer Data (`silver.crm_cust_info`)
+
+<AccordionGroup>
+  <Accordion title="Whitespace Trimming" icon="text" defaultOpen>
+    All text fields are trimmed to remove leading and trailing whitespace.
+
+    ```sql
+    SELECT
+      cst_id, 
+      TRIM(cst_key) AS cst_key,
+      TRIM(cst_firstname) AS cst_firstname, 
+      TRIM(cst_lastname) AS cst_lastname,
+      -- ...
+    FROM bronze.crm_cust_info
+    ```
+
+    **Purpose:** Ensures consistency in joins and prevents matching issues due to invisible characters.
+  </Accordion>
+
+  <Accordion title="Marital Status Standardization" icon="ring">
+    Single-letter codes are converted to full descriptive values.
+
+    ```sql
+    CASE UPPER(TRIM(cst_marital_status)) 
+      WHEN 'S' THEN 'Single' 
+      WHEN 'M' THEN 'Married' 
+      ELSE 'n/a'
+    END AS cst_marital_status
+    ```
+
+    <Tabs>
+      <Tab title="Input Values">
+        - `'S'` or `'s'` → Single
+        - `'M'` or `'m'` → Married
+        - Any other value → n/a
+      </Tab>
+      <Tab title="Output Values">
+        - `'Single'`
+        - `'Married'`
+        - `'n/a'`
+      </Tab>
+    </Tabs>
+  </Accordion>
+
+  <Accordion title="Gender Standardization" icon="venus-mars">
+    Gender codes are standardized to consistent values.
+
+    ```sql
+    CASE UPPER(TRIM(cst_gndr)) 
+      WHEN 'M' THEN 'Male' 
+      WHEN 'F' THEN 'Female' 
+      ELSE 'n/a'
+    END AS cst_gndr
+    ```
+
+    **Transformation:**
+    - `'M'` → `'Male'`
+    - `'F'` → `'Female'`
+    - Unknown/NULL → `'n/a'`
+  </Accordion>
+
+  <Accordion title="Deduplication Logic" icon="filter">
+    When multiple records exist for the same customer, only the most recent is retained.
+
+    ```sql
+    SELECT *, 
+      ROW_NUMBER() OVER (
+        PARTITION BY cst_id 
+        ORDER BY cst_create_date DESC
+      ) AS flag_last
+    FROM bronze.crm_cust_info
+    WHERE flag_last = 1
+    ```
+
+    <Steps>
+      <Step title="Partition by Customer ID">
+        Group all records by `cst_id` to identify duplicates.
+      </Step>
+      <Step title="Order by Create Date">
+        Sort records within each group by creation date (most recent first).
+      </Step>
+      <Step title="Select Latest Record">
+        Retain only the record with `flag_last = 1` (most recent).
+      </Step>
+    </Steps>
+  </Accordion>
+</AccordionGroup>
+
+## Product Information Validation
+
+### CRM Product Data (`silver.crm_prd_info`)
+
+<AccordionGroup>
+  <Accordion title="Category ID Extraction" icon="scissors">
+    Extracts and standardizes category identifiers from product keys.
+
+    ```sql
+    SELECT
+      prd_id,
+      REPLACE(SUBSTRING(TRIM(prd_key), 1, 5), '-', '_') AS cat_id,
+      SUBSTRING(prd_key, 7, LENGTH(prd_key)) AS prd_key,
+      -- ...
+    FROM bronze.crm_prd_info
+    ```
+
+    **Logic:**
+    1. Extract first 5 characters from product key
+    2. Replace hyphens with underscores for consistency
+    3. Extract remaining characters as the cleaned product key
+  </Accordion>
+
+  <Accordion title="Null Handling for Cost" icon="dollar-sign">
+    Ensures product cost is never null by defaulting to zero.
+
+    ```sql
+    COALESCE(prd_cost, 0) AS prd_cost
+    ```
+
+    <Warning>
+      While defaulting to zero prevents null values, consider whether zero is a meaningful cost for your business logic. You may want to flag these records for review.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Product Line Standardization" icon="layer-group">
+    Converts abbreviated product line codes to full descriptions.
+
+    ```sql
+    CASE UPPER(TRIM(prd_line))
+      WHEN 'M' THEN 'Mountain'
+      WHEN 'R' THEN 'Road'
+      WHEN 'S' THEN 'Other sales'
+      WHEN 'T' THEN 'Touring'
+      ELSE 'n/a'
+    END AS prd_line
+    ```
+
+    | Input Code | Output Value |
+    |------------|-------------|
+    | M | Mountain |
+    | R | Road |
+    | S | Other sales |
+    | T | Touring |
+    | Other/NULL | n/a |
+  </Accordion>
+
+  <Accordion title="End Date Calculation" icon="calendar-range">
+    Calculates product validity end dates using window functions.
+
+    ```sql
+    LEAD(prd_start_dt) OVER (
+      PARTITION BY prd_key 
+      ORDER BY prd_start_dt
+    ) - 1 AS prd_end_dt
+    ```
+
+    **Logic:**
+    - For each product version, the end date is one day before the next version's start date
+    - This creates non-overlapping validity periods for slowly changing dimensions
+    - The latest version will have a NULL end date (currently active)
+  </Accordion>
+</AccordionGroup>
+
+## Sales Transaction Validation
+
+### Sales Details (`silver.crm_sales_details`)
+
+This table contains the most complex validation rules due to the critical nature of financial data.
+
+<AccordionGroup>
+  <Accordion title="Date Format Validation" icon="calendar-check" defaultOpen>
+    Converts integer dates (YYYYMMDD format) to proper date types with validation.
+
+    ```sql
+    -- Order Date Validation
+    CASE
+      WHEN sls_ord_dt IS NULL
+        OR sls_ord_dt = 0
+        OR LENGTH(sls_ord_dt::TEXT) != 8
+      THEN NULL
+      ELSE TO_DATE(TRIM(sls_ord_dt::TEXT), 'YYYYMMDD')
+    END AS sls_ord_dt,
+
+    -- Ship Date Validation
+    CASE 
+      WHEN sls_ship_dt IS NULL
+        OR sls_ship_dt = 0
+        OR LENGTH(sls_ship_dt::TEXT) != 8        
+      THEN NULL
+      ELSE TO_DATE(TRIM(sls_ship_dt::TEXT), 'YYYYMMDD')
+    END AS sls_ship_dt,
+
+    -- Due Date Validation
+    CASE
+      WHEN sls_due_dt IS NULL 
+        OR sls_due_dt = 0
+        OR LENGTH(sls_due_dt::TEXT) != 8 
+      THEN NULL
+      ELSE TO_DATE(sls_due_dt::TEXT, 'YYYYMMDD')
+    END AS sls_due_dt
+    ```
+
+    <Steps>
+      <Step title="Check for NULL or Zero">
+        Invalid dates are often represented as NULL or 0 in source systems.
+      </Step>
+      <Step title="Validate Length">
+        Ensure the date string is exactly 8 characters (YYYYMMDD).
+      </Step>
+      <Step title="Parse Date">
+        Convert the validated string to a proper DATE type.
+      </Step>
+      <Step title="Return NULL on Failure">
+        If any validation fails, return NULL rather than causing an error.
+      </Step>
+    </Steps>
+  </Accordion>
+
+  <Accordion title="Sales Amount Validation" icon="calculator">
+    Ensures sales amounts are mathematically correct and non-negative.
+
+    ```sql
+    CASE 
+      WHEN sls_sales IS NULL 
+        OR sls_sales <= 0 
+        OR sls_sales != sls_quantity * ABS(sls_price) 
+      THEN sls_quantity * ABS(sls_price)
+      ELSE sls_sales
+    END AS sls_sales
+    ```
+
+    **Validation Rules:**
+    - If sales amount is NULL, calculate it from quantity × price
+    - If sales amount is ≤ 0, recalculate it
+    - If sales amount doesn't match quantity × price, recalculate it
+    - Use absolute value of price to handle negative values
+
+    <Note>
+      This approach ensures data consistency by deriving correct values rather than rejecting records.
+    </Note>
+  </Accordion>
+
+  <Accordion title="Price Validation and Correction" icon="dollar-sign">
+    Handles invalid prices by deriving them from sales and quantity.
+
+    ```sql
+    CASE 
+      WHEN sls_price IS NULL 
+        OR sls_price = 0 
+      THEN sls_sales / ABS(sls_quantity)
+      WHEN sls_price < 0 
+      THEN ABS(sls_price)
+      ELSE sls_price
+    END AS sls_price
+    ```
+
+    **Correction Logic:**
+    1. If price is NULL or zero → Calculate from `sales ÷ quantity`
+    2. If price is negative → Convert to absolute value
+    3. Otherwise → Keep original price
+
+    <Warning>
+      This assumes that quantity and sales values are more reliable than price. Adjust logic based on your data quality assessment.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+## ERP Data Validation
+
+### Customer Demographics (`silver.erp_cust_az12`)
+
+<AccordionGroup>
+  <Accordion title="Customer ID Cleaning" icon="hashtag">
+    Removes prefixes from customer IDs for standardization.
+
+    ```sql
+    CASE 
+      WHEN cid LIKE 'NAS%' 
+      THEN SUBSTRING(cid, 4, LENGTH(cid))
+      ELSE cid
+    END AS cid
+    ```
+
+    Removes the `'NAS'` prefix from customer IDs to align with other system identifiers.
+  </Accordion>
+
+  <Accordion title="Birthdate Range Validation" icon="calendar">
+    Ensures birthdates are within reasonable ranges.
+
+    ```sql
+    CASE 
+      WHEN bdate > CURRENT_DATE 
+      THEN NULL
+      ELSE bdate
+    END AS bdate
+    ```
+
+    **Validation:**
+    - Future dates are set to NULL (impossible birthdates)
+    - Quality tests further validate dates are after 1924
+  </Accordion>
+
+  <Accordion title="Gender Normalization" icon="venus-mars">
+    Standardizes various gender representations.
+
+    ```sql
+    CASE 
+      WHEN UPPER(TRIM(gen)) IN ('F', 'FEMALE') 
+      THEN 'Female'
+      WHEN UPPER(TRIM(gen)) IN ('M', 'MALE') 
+      THEN 'Male'
+      ELSE 'n/a'
+    END AS gen
+    ```
+
+    **Accepted Inputs:**
+    - Female: `'F'`, `'f'`, `'FEMALE'`, `'female'`, `'Female'`
+    - Male: `'M'`, `'m'`, `'MALE'`, `'male'`, `'Male'`
+    - Unknown: Any other value → `'n/a'`
+  </Accordion>
+</AccordionGroup>
+
+### Location Data (`silver.erp_loc_a101`)
+
+<AccordionGroup>
+  <Accordion title="Customer ID Formatting" icon="hashtag">
+    Removes hyphens from customer IDs for consistency.
+
+    ```sql
+    REPLACE(cid, '-', '') AS cid
+    ```
+  </Accordion>
+
+  <Accordion title="Country Standardization" icon="globe">
+    Converts country codes to full country names.
+
+    ```sql
+    CASE 
+      WHEN TRIM(cntry) IN ('USA', 'US') 
+      THEN 'United States'
+      WHEN TRIM(cntry) = 'CAN' 
+      THEN 'Canada'
+      WHEN TRIM(cntry) = 'DE' 
+      THEN 'Germany'
+      WHEN TRIM(cntry) = '' OR TRIM(cntry) IS NULL 
+      THEN 'n/a'
+      ELSE TRIM(cntry)
+    END AS cntry
+    ```
+
+    | Input Code | Output Value |
+    |------------|-------------|
+    | USA, US | United States |
+    | CAN | Canada |
+    | DE | Germany |
+    | Empty/NULL | n/a |
+    | Other codes | Kept as-is (trimmed) |
+  </Accordion>
+</AccordionGroup>
+
+### Product Categories (`silver.erp_px_cat_g1v2`)
+
+This table currently passes through data without transformation, but quality tests ensure:
+- No unwanted whitespace in category fields
+- Standardized maintenance status values
+
+```sql
+-- Simple pass-through with minimal transformation
+INSERT INTO silver.erp_px_cat_g1v2 (id, cat, subcat, manteinance)
+SELECT id, cat, subcat, manteinance
+FROM bronze.erp_px_cat_g1v2;
+```
+
+## Data Quality Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use TRIM Consistently" icon="text">
+    Always trim text fields to prevent hidden whitespace issues in joins and filters.
+  </Card>
+  <Card title="Standardize Codes" icon="list-check">
+    Convert cryptic codes to meaningful values during transformation, not in reporting.
+  </Card>
+  <Card title="Handle NULLs Explicitly" icon="circle-xmark">
+    Use COALESCE or CASE statements to make NULL handling intentional and visible.
+  </Card>
+  <Card title="Document Assumptions" icon="file-lines">
+    Comment your validation logic to explain business rules and assumptions.
+  </Card>
+  <Card title="Fail Gracefully" icon="shield-check">
+    Return NULL or default values rather than causing errors, but log these occurrences.
+  </Card>
+  <Card title="Test Thoroughly" icon="flask">
+    Run quality checks after every transformation to catch issues early.
+  </Card>
+</CardGroup>
+
+### Validation Principles
+
+<Steps>
+  <Step title="Validate Early">
+    Apply validation rules as early as possible in the data pipeline (Bronze → Silver transformation).
+  </Step>
+
+  <Step title="Be Explicit">
+    Make all data quality rules explicit in code rather than relying on downstream error handling.
+  </Step>
+
+  <Step title="Document Exceptions">
+    When data doesn't meet quality standards, document why you're correcting it vs. rejecting it.
+  </Step>
+
+  <Step title="Monitor Trends">
+    Track validation failures over time to identify systemic data quality issues.
+  </Step>
+
+  <Step title="Collaborate with Source Systems">
+    Work with upstream teams to fix data quality at the source when possible.
+  </Step>
+</Steps>
+
+### Common Pitfalls to Avoid
+
+<Warning>
+  **Anti-patterns to avoid:**
+
+  1. **Silent Failures:** Allowing invalid data to pass through without logging or alerting
+  2. **Over-correction:** Automatically "fixing" data when the issue should be investigated
+  3. **Inconsistent Rules:** Applying different validation logic to similar fields
+  4. **Missing Documentation:** Not explaining why specific validation rules exist
+  5. **No Monitoring:** Failing to track how often validation rules are triggered
+</Warning>
+
+## Validation Rule Reference
+
+Quick reference for all validation transformations applied in the Silver layer:
+
+| Source Table | Field | Validation Rule | Purpose |
+|--------------|-------|-----------------|----------|
+| `crm_cust_info` | All text | TRIM() | Remove whitespace |
+| `crm_cust_info` | `cst_marital_status` | Code → Description | Standardize values |
+| `crm_cust_info` | `cst_gndr` | Code → Description | Standardize values |
+| `crm_cust_info` | Duplicates | ROW_NUMBER() window | Keep latest record |
+| `crm_prd_info` | `cat_id` | Extract & replace | Normalize category ID |
+| `crm_prd_info` | `prd_cost` | COALESCE(cost, 0) | Handle nulls |
+| `crm_prd_info` | `prd_line` | Code → Description | Standardize values |
+| `crm_prd_info` | `prd_end_dt` | LEAD() window | Calculate SCD dates |
+| `crm_sales_details` | Date fields | Format validation | Ensure valid dates |
+| `crm_sales_details` | `sls_sales` | Recalculate if invalid | Ensure accuracy |
+| `crm_sales_details` | `sls_price` | Derive or correct | Handle negatives/nulls |
+| `erp_cust_az12` | `cid` | Remove prefix | Standardize format |
+| `erp_cust_az12` | `bdate` | Range check | Validate dates |
+| `erp_cust_az12` | `gen` | Multiple formats → Standard | Normalize gender |
+| `erp_loc_a101` | `cid` | Remove hyphens | Standardize format |
+| `erp_loc_a101` | `cntry` | Code → Full name | Expand abbreviations |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quality Testing" icon="flask" href="/quality/testing">
+    Learn how to run quality tests to verify validation effectiveness
+  </Card>
+  <Card title="Silver Layer" icon="filter" href="/pipeline/silver-layer">
+    Deep dive into the Silver layer transformation procedures
+  </Card>
+  <Card title="Transformations" icon="wand-magic-sparkles" href="/schema/silver/transformations">
+    Explore detailed transformation logic in the Silver schema
+  </Card>
+  <Card title="ETL Procedures" icon="gears" href="/pipeline/etl-procedures">
+    Review the complete ETL pipeline procedures
+  </Card>
+</CardGroup>

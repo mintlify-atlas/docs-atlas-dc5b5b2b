@@ -1,0 +1,87 @@
+---
+title: "ERP Tables"
+description: "ERP source tables in the Bronze schema layer"
+---
+
+The Bronze schema contains raw ERP data tables that store customer demographics, location data, and product categorization information.
+
+## bronze.erp_cust_az12
+
+ERP customer demographics table containing customer birth date and gender information.
+
+<ParamField path="cid" type="VARCHAR(50)">
+  Customer ID - Unique identifier for each customer in the ERP system
+</ParamField>
+
+<ParamField path="bdate" type="DATE">
+  Birth date - Customer's date of birth
+</ParamField>
+
+<ParamField path="gen" type="VARCHAR(10)">
+  Gender - Customer gender
+</ParamField>
+
+### DDL
+
+```sql
+DROP TABLE IF EXISTS bronze.erp_cust_az12;
+CREATE TABLE bronze.erp_cust_az12 (
+    cid VARCHAR(50),
+    bdate DATE,
+    gen VARCHAR(10)
+);
+```
+
+## bronze.erp_loc_a101
+
+ERP location table containing customer country information.
+
+<ParamField path="cid" type="VARCHAR(50)">
+  Customer ID - Unique identifier linking to customer records
+</ParamField>
+
+<ParamField path="cntry" type="VARCHAR(100)">
+  Country - Customer's country of residence
+</ParamField>
+
+### DDL
+
+```sql
+DROP TABLE IF EXISTS bronze.erp_loc_a101;
+CREATE TABLE bronze.erp_loc_a101 (
+    cid VARCHAR(50),
+    cntry VARCHAR(100)
+);
+```
+
+## bronze.erp_px_cat_g1v2
+
+ERP product categorization table containing product category hierarchy and maintenance information.
+
+<ParamField path="id" type="VARCHAR(50)">
+  Product ID - Unique identifier for each product in the ERP system
+</ParamField>
+
+<ParamField path="cat" type="VARCHAR(50)">
+  Category - Primary product category
+</ParamField>
+
+<ParamField path="subcat" type="VARCHAR(50)">
+  Subcategory - Product subcategory
+</ParamField>
+
+<ParamField path="manteinance" type="VARCHAR(50)">
+  Maintenance - Product maintenance classification or status
+</ParamField>
+
+### DDL
+
+```sql
+DROP TABLE IF EXISTS bronze.erp_px_cat_g1v2;
+CREATE TABLE bronze.erp_px_cat_g1v2 (
+    id VARCHAR(50),
+    cat VARCHAR(50),
+    subcat VARCHAR(50),
+    manteinance VARCHAR(50)
+);
+```

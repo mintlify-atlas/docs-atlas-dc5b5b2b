@@ -1,0 +1,263 @@
+---
+title: "bronze.load_bronze()"
+description: "Load raw data from CSV files into bronze layer tables"
+---
+
+## Procedure Signature
+
+```sql
+bronze.load_bronze()
+```
+
+**Returns:** void
+
+**Language:** PL/pgSQL
+
+**Security:** SECURITY DEFINER
+
+## Purpose and Functionality
+
+The `bronze.load_bronze()` procedure is responsible for loading raw data from CSV files into the bronze layer tables. This is the first stage of the data warehouse ETL pipeline, where data is ingested in its original form from source systems (CRM and ERP).
+
+The procedure loads data from two source systems:
+- **CRM System**: Customer information, product information, and sales details
+- **ERP System**: Customer demographics, location data, and product categories
+
+## Procedure Code
+
+```sql
+CREATE OR REPLACE PROCEDURE bronze.load_bronze()
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_step TEXT;
+  v_ok int := 0;
+  v_err int := 0;
+  v_msg TEXT;
+  v_start_batch timestamp := clock_timestamp();
+  v_end_batch timestamp;
+BEGIN
+  RAISE NOTICE '[%] load bronze started', to_char(clock_timestamp(), 'HH24:MI:SS');
+  
+  -- Load CRM customer information
+  BEGIN
+    DECLARE
+      v_start_date timestamp  := clock_timestamp();
+    BEGIN
+    v_step := 'load bronze.crm_cust_info';
+    RAISE NOTICE 'Step [%] started at %', v_step, to_char(v_start_date, 'HH24:MI:SS');
+    TRUNCATE TABLE bronze.crm_cust_info;
+    COPY bronze.crm_cust_info
+      FROM '/datasets/source_crm/cust_info.csv'
+      WITH (FORMAT csv, HEADER true);
+    v_ok := v_ok + 1;
+    RAISE NOTICE 'Step [%] completed successfully (%.0f s)',
+             v_step,
+             extract(epoch FROM (clock_timestamp() - v_start_date));
+    Exception WHEN OTHERS THEN
+      v_err := v_err + 1;
+      v_msg := 'Error in step: ' || v_step || ' - ' || SQLERRM;
+      RAISE EXCEPTION '%', v_msg;
+  END;
+  END;
+
+  -- Load CRM product information
+  BEGIN
+  DECLARE
+      v_start_date timestamp  := clock_timestamp();
+    BEGIN
+    v_step := 'load bronze.crm_prd_info';
+    TRUNCATE TABLE bronze.crm_prd_info;
+    COPY bronze.crm_prd_info
+      FROM '/datasets/source_crm/prd_info.csv'
+      WITH (FORMAT csv, HEADER true);
+    v_ok := v_ok + 1;
+    RAISE NOTICE 'Step [%] completed successfully (%.0f s)',
+             v_step,
+             extract(epoch FROM (clock_timestamp() - v_start_date));
+    Exception WHEN OTHERS THEN
+      v_err := v_err + 1;
+      v_msg := 'Error in step: ' || v_step || ' - ' || SQLERRM;
+      RAISE EXCEPTION '%', v_msg;
+  END;
+  END;
+  
+  -- Load CRM sales details
+  BEGIN
+  DECLARE
+      v_start_date timestamp  := clock_timestamp();
+    BEGIN
+    v_step := 'load bronze.crm_sales_details';
+    TRUNCATE TABLE bronze.crm_sales_details;
+    COPY bronze.crm_sales_details
+      FROM '/datasets/source_crm/sales_details.csv'
+      WITH (FORMAT csv, HEADER true);
+    v_ok := v_ok + 1;
+    RAISE NOTICE 'Step [%] completed successfully (%.0f s)',
+             v_step,
+             extract(epoch FROM (clock_timestamp() - v_start_date));
+    Exception WHEN OTHERS THEN
+      v_err := v_err + 1;
+      v_msg := 'Error in step: ' || v_step || ' - ' || SQLERRM;
+      RAISE EXCEPTION '%', v_msg;
+  END;
+  END;
+  
+  -- Load ERP customer data
+  BEGIN
+  DECLARE
+      v_start_date timestamp  := clock_timestamp();
+    BEGIN
+    v_step := 'load bronze.erp_cust_az12'; 
+    TRUNCATE TABLE bronze.erp_cust_az12;
+    COPY bronze.erp_cust_az12
+      FROM '/datasets/source_erp/CUST_AZ12.csv'
+      WITH (FORMAT csv, HEADER true);
+    v_ok := v_ok + 1;
+    RAISE NOTICE 'Step [%] completed successfully (%.0f s)',
+             v_step,
+             extract(epoch FROM (clock_timestamp() - v_start_date));
+    Exception WHEN OTHERS THEN
+      v_err := v_err + 1;
+      v_msg := 'Error in step: ' || v_step || ' - ' || SQLERRM;
+      RAISE EXCEPTION '%', v_msg;
+  END;
+  END;
+
+  -- Load ERP location data
+  BEGIN
+  DECLARE
+      v_start_date timestamp  := clock_timestamp();
+    BEGIN
+    v_step := 'load bronze.erp_loc_a101';
+    TRUNCATE TABLE bronze.erp_loc_a101;
+    COPY bronze.erp_loc_a101
+      FROM '/datasets/source_erp/LOC_A101.csv'    
+      WITH (FORMAT csv, HEADER true);
+    v_ok := v_ok + 1;
+    RAISE NOTICE 'Step [%] completed successfully (%.0f s)',
+             v_step,
+             extract(epoch FROM (clock_timestamp() - v_start_date));
+    Exception WHEN OTHERS THEN
+      v_err := v_err + 1;
+      v_msg := 'Error in step: ' || v_step || ' - ' || SQLERRM;
+      RAISE EXCEPTION '%', v_msg;
+  END;
+  END;
+  
+  -- Load ERP product category data
+  BEGIN
+  DECLARE
+      v_start_date timestamp  := clock_timestamp();
+    BEGIN
+    v_step := 'load bronze.erp_px_cat_g1v2';
+    TRUNCATE TABLE bronze.erp_px_cat_g1v2;
+    COPY bronze.erp_px_cat_g1v2
+      FROM '/datasets/source_erp/PX_CAT_G1V2.csv'    
+      WITH (FORMAT csv, HEADER true);
+    v_ok := v_ok + 1;
+    RAISE NOTICE 'Step [%] completed successfully (%.0f s)',
+             v_step,
+             extract(epoch FROM (clock_timestamp() - v_start_date));
+    Exception WHEN OTHERS THEN
+      v_err := v_err + 1;
+      v_msg := 'Error in step: ' || v_step || ' - ' || SQLERRM;
+      RAISE EXCEPTION '%', v_msg;
+  END;
+  END;
+  
+  v_end_batch := clock_timestamp();
+  RAISE NOTICE '[%] load bronze finished', to_char(v_end_batch, 'HH24:MI:SS');
+  RAISE NOTICE 'load bronze finished in [%] seconds', extract(epoch FROM (v_end_batch - v_start_batch));
+END;
+$$;
+```
+
+## Steps Performed
+
+<Steps>
+  <Step title="Load CRM Customer Information">
+    Truncates and loads data into `bronze.crm_cust_info` from `/datasets/source_crm/cust_info.csv`
+  </Step>
+  
+  <Step title="Load CRM Product Information">
+    Truncates and loads data into `bronze.crm_prd_info` from `/datasets/source_crm/prd_info.csv`
+  </Step>
+  
+  <Step title="Load CRM Sales Details">
+    Truncates and loads data into `bronze.crm_sales_details` from `/datasets/source_crm/sales_details.csv`
+  </Step>
+  
+  <Step title="Load ERP Customer Data">
+    Truncates and loads data into `bronze.erp_cust_az12` from `/datasets/source_erp/CUST_AZ12.csv`
+  </Step>
+  
+  <Step title="Load ERP Location Data">
+    Truncates and loads data into `bronze.erp_loc_a101` from `/datasets/source_erp/LOC_A101.csv`
+  </Step>
+  
+  <Step title="Load ERP Product Category Data">
+    Truncates and loads data into `bronze.erp_px_cat_g1v2` from `/datasets/source_erp/PX_CAT_G1V2.csv`
+  </Step>
+</Steps>
+
+## Usage Example
+
+```sql
+CALL bronze.load_bronze();
+```
+
+**Expected Output:**
+```
+NOTICE:  [16:30:45] load bronze started
+NOTICE:  Step [load bronze.crm_cust_info] started at 16:30:45
+NOTICE:  Step [load bronze.crm_cust_info] completed successfully (2 s)
+NOTICE:  Step [load bronze.crm_prd_info] completed successfully (1 s)
+NOTICE:  Step [load bronze.crm_sales_details] completed successfully (3 s)
+NOTICE:  Step [load bronze.erp_cust_az12] completed successfully (1 s)
+NOTICE:  Step [load bronze.erp_loc_a101] completed successfully (1 s)
+NOTICE:  Step [load bronze.erp_px_cat_g1v2] completed successfully (1 s)
+NOTICE:  [16:30:54] load bronze finished
+NOTICE:  load bronze finished in [9] seconds
+```
+
+## Error Handling
+
+<Note>
+The procedure implements comprehensive error handling with the following features:
+</Note>
+
+- **Step-level Error Tracking**: Each load operation is wrapped in its own exception handler
+- **Descriptive Error Messages**: Errors include the step name and PostgreSQL error message (`SQLERRM`)
+- **Fail-Fast Behavior**: If any step fails, the procedure raises an exception and halts execution
+- **Performance Tracking**: Each step logs its execution time in seconds
+- **Counter Variables**: Maintains `v_ok` (successful steps) and `v_err` (failed steps) counters
+
+<Warning>
+If a step fails, all subsequent steps are skipped and the procedure terminates with an error message in the format:
+
+```
+Error in step: [step_name] - [error_details]
+```
+</Warning>
+
+## Permissions
+
+The procedure grants the following permissions:
+
+```sql
+GRANT EXECUTE ON PROCEDURE bronze.load_bronze TO PUBLIC;
+GRANT USAGE ON SCHEMA bronze TO PUBLIC;
+```
+
+## Data Sources
+
+| Table | Source File | System |
+|-------|-------------|--------|
+| `bronze.crm_cust_info` | `/datasets/source_crm/cust_info.csv` | CRM |
+| `bronze.crm_prd_info` | `/datasets/source_crm/prd_info.csv` | CRM |
+| `bronze.crm_sales_details` | `/datasets/source_crm/sales_details.csv` | CRM |
+| `bronze.erp_cust_az12` | `/datasets/source_erp/CUST_AZ12.csv` | ERP |
+| `bronze.erp_loc_a101` | `/datasets/source_erp/LOC_A101.csv` | ERP |
+| `bronze.erp_px_cat_g1v2` | `/datasets/source_erp/PX_CAT_G1V2.csv` | ERP |

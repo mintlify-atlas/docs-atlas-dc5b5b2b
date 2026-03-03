@@ -1,0 +1,131 @@
+---
+title: 'Architecture Overview'
+description: 'Comprehensive overview of the SQL Data Warehouse architecture, data flow, and technology stack'
+---
+
+## Introduction
+
+This data warehouse project demonstrates a comprehensive end-to-end solution for consolidating sales data from multiple source systems into a unified analytical platform. Built with PostgreSQL and Docker, the warehouse enables business intelligence, reporting, and data-driven decision-making.
+
+<Info>
+  The architecture follows industry best practices in data engineering, implementing the Medallion Architecture pattern with Bronze, Silver, and Gold layers for progressive data refinement.
+</Info>
+
+## Architecture Diagram
+
+The data warehouse architecture implements a three-layer approach for data processing and transformation:
+
+<Frame caption="Data warehouse architecture showing the flow from source systems through Bronze-Silver-Gold layers">
+  <img src="/images/DataWareHouse.png" alt="Data warehouse architecture diagram" />
+</Frame>
+
+## Data Flow
+
+Data flows through the system in a structured, progressive manner:
+
+<Steps>
+  <Step title="Source Systems">
+    Raw data originates from two primary business systems:
+    - **ERP System**: Enterprise Resource Planning data
+    - **CRM System**: Customer Relationship Management data
+    
+    Both systems export data as CSV files for ingestion.
+  </Step>
+  
+  <Step title="Bronze Layer (Raw Ingestion)">
+    CSV files are loaded directly into PostgreSQL tables with minimal transformation. This layer preserves the original data structure and serves as the single source of truth.
+    
+    <Tip>The Bronze layer acts as a data lake, storing raw data exactly as received from source systems.</Tip>
+  </Step>
+  
+  <Step title="Silver Layer (Cleansing & Standardization)">
+    Data undergoes quality checks, cleansing, and standardization:
+    - Remove duplicates and inconsistencies
+    - Standardize data formats and naming conventions
+    - Normalize data structures
+    - Resolve data quality issues
+  </Step>
+  
+  <Step title="Gold Layer (Business-Ready Analytics)">
+    Refined data is modeled into a star schema optimized for analytical queries:
+    - Fact tables for business transactions
+    - Dimension tables for analytical context
+    - Pre-aggregated metrics for performance
+    - Business-friendly naming and structure
+  </Step>
+</Steps>
+
+## Technology Stack
+
+The data warehouse is built with modern, proven technologies:
+
+<Columns cols={2}>
+  <Card title="PostgreSQL" icon="database" color="#336791">
+    Open-source relational database providing robust data storage, ACID compliance, and powerful SQL capabilities for data transformation and analytics.
+  </Card>
+  
+  <Card title="Docker" icon="docker" color="#2496ED">
+    Containerization platform ensuring consistent development and deployment environments. Simplifies setup and makes the warehouse portable across systems.
+  </Card>
+  
+  <Card title="PL/pgSQL" icon="code" color="#4169E1">
+    PostgreSQL's procedural language for implementing ETL logic, stored procedures, and complex data transformations within the database.
+  </Card>
+  
+  <Card title="SQL" icon="terminal" color="#F29111">
+    Standard SQL for data modeling, queries, and analytics. Enables business users and analysts to extract insights directly from the warehouse.
+  </Card>
+</Columns>
+
+## Key Capabilities
+
+<AccordionGroup>
+  <Accordion title="Data Integration" icon="arrows-to-circle">
+    Consolidates data from multiple source systems (ERP and CRM) into a unified data model, eliminating data silos and providing a single source of truth for analytics.
+  </Accordion>
+  
+  <Accordion title="Data Quality Management" icon="shield-check">
+    Implements comprehensive data cleansing and validation in the Silver layer to ensure high-quality, trustworthy data for business decisions.
+  </Accordion>
+  
+  <Accordion title="Analytical Optimization" icon="gauge-high">
+    Star schema design in the Gold layer optimizes query performance for common analytical patterns, enabling fast reporting and ad-hoc analysis.
+  </Accordion>
+  
+  <Accordion title="Scalability" icon="chart-line">
+    PostgreSQL's robust architecture and Docker containerization provide a foundation for scaling the warehouse as data volumes and user demands grow.
+  </Accordion>
+</AccordionGroup>
+
+## Project Objectives
+
+The data warehouse project fulfills multiple business and technical objectives:
+
+<CardGroup cols={2}>
+  <Card title="Consolidate Sales Data" icon="database">
+    Integrate sales information from disparate ERP and CRM systems into a unified repository.
+  </Card>
+  
+  <Card title="Enable Analytics" icon="chart-column">
+    Provide a foundation for SQL-based reporting, dashboards, and business intelligence tools.
+  </Card>
+  
+  <Card title="Ensure Data Quality" icon="circle-check">
+    Implement systematic data cleansing and validation to maintain high data integrity.
+  </Card>
+  
+  <Card title="Support Decision-Making" icon="lightbulb">
+    Deliver actionable insights on customer behavior, product performance, and sales trends.
+  </Card>
+</CardGroup>
+
+<Note>
+  This project focuses on current state data. Historical tracking and slowly changing dimensions are not implemented in this version.
+</Note>
+
+## Next Steps
+
+Explore the architecture in greater detail:
+
+- [Medallion Layers](/architecture/medallion-layers) - Deep dive into Bronze, Silver, and Gold layer implementations
+- [Data Model](/architecture/data-model) - Detailed star schema design and table structures

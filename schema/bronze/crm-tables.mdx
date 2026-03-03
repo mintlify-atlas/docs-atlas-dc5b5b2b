@@ -1,0 +1,156 @@
+---
+title: "CRM Tables"
+description: "CRM source tables in the Bronze schema layer"
+---
+
+The Bronze schema contains raw CRM data tables that store customer information, product details, and sales transactions.
+
+## bronze.crm_cust_info
+
+Customer information table containing demographic and registration data.
+
+<ParamField path="cst_id" type="INT">
+  Customer ID - Unique identifier for each customer
+</ParamField>
+
+<ParamField path="cst_key" type="VARCHAR(50)">
+  Customer key - Business key for customer identification
+</ParamField>
+
+<ParamField path="cst_firstname" type="VARCHAR(100)">
+  Customer first name
+</ParamField>
+
+<ParamField path="cst_lastname" type="VARCHAR(100)">
+  Customer last name
+</ParamField>
+
+<ParamField path="cst_marital_status" type="VARCHAR(100)">
+  Customer marital status
+</ParamField>
+
+<ParamField path="cst_gndr" type="VARCHAR(10)">
+  Customer gender
+</ParamField>
+
+<ParamField path="cst_create_date" type="DATE">
+  Date when customer record was created
+</ParamField>
+
+### DDL
+
+```sql
+DROP TABLE IF EXISTS bronze.crm_cust_info;
+CREATE TABLE bronze.crm_cust_info (
+    cst_id INT,
+    cst_key VARCHAR(50),
+    cst_firstname VARCHAR(100),
+    cst_lastname VARCHAR(100),
+    cst_marital_status VARCHAR(100),
+    cst_gndr VARCHAR(10),
+    cst_create_date DATE
+);
+```
+
+## bronze.crm_prd_info
+
+Product information table containing product catalog data.
+
+<ParamField path="prd_id" type="INT">
+  Product ID - Unique identifier for each product
+</ParamField>
+
+<ParamField path="prd_key" type="VARCHAR(50)">
+  Product key - Business key for product identification
+</ParamField>
+
+<ParamField path="prd_name" type="VARCHAR(100)">
+  Product name
+</ParamField>
+
+<ParamField path="prd_cost" type="DECIMAL(10, 2)">
+  Product cost
+</ParamField>
+
+<ParamField path="prd_line" type="CHAR(10)">
+  Product line or category
+</ParamField>
+
+<ParamField path="prd_start_dt" type="DATE">
+  Product start date - When product became available
+</ParamField>
+
+<ParamField path="prd_end_dt" type="DATE">
+  Product end date - When product was discontinued
+</ParamField>
+
+### DDL
+
+```sql
+CREATE TABLE bronze.crm_prd_info (
+    prd_id INT,
+    prd_key VARCHAR(50),
+    prd_name VARCHAR(100),
+    prd_cost DECIMAL(10, 2),
+    prd_line CHAR(10),
+    prd_start_dt DATE,
+    prd_end_dt DATE
+);
+```
+
+## bronze.crm_sales_details
+
+Sales transaction details table containing order and sales information.
+
+<ParamField path="sls_ord_num" type="VARCHAR(50)">
+  Sales order number - Unique identifier for each order
+</ParamField>
+
+<ParamField path="sls_prd_key" type="VARCHAR(50)">
+  Sales product key - Links to product information
+</ParamField>
+
+<ParamField path="sls_cust_id" type="INT">
+  Sales customer ID - Links to customer information
+</ParamField>
+
+<ParamField path="sls_ord_dt" type="INT">
+  Sales order date - Date when order was placed (integer format)
+</ParamField>
+
+<ParamField path="sls_ship_dt" type="INT">
+  Sales ship date - Date when order was shipped (integer format)
+</ParamField>
+
+<ParamField path="sls_due_dt" type="INT">
+  Sales due date - Date when order is due (integer format)
+</ParamField>
+
+<ParamField path="sls_sales" type="INT">
+  Sales amount (integer representation)
+</ParamField>
+
+<ParamField path="sls_quantity" type="INT">
+  Sales quantity - Number of units sold
+</ParamField>
+
+<ParamField path="sls_price" type="DECIMAL(10, 2)">
+  Sales price - Unit price
+</ParamField>
+
+### DDL
+
+```sql
+DROP TABLE IF EXISTS bronze.crm_sales_details;
+CREATE TABLE bronze.crm_sales_details (
+    sls_ord_num VARCHAR(50),
+    sls_prd_key VARCHAR(50),
+    sls_cust_id INT,
+    sls_ord_dt INT,
+    sls_ship_dt INT,
+    sls_due_dt INT,
+    sls_sales INT,
+    sls_quantity INT,
+    sls_price DECIMAL(10, 2)
+);
+```

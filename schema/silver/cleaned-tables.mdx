@@ -1,0 +1,291 @@
+---
+title: "Cleaned Tables"
+description: "Silver layer table structures with standardized schemas and data quality enhancements"
+---
+
+The Silver layer contains cleaned and standardized tables from both CRM and ERP source systems. All tables include a `dwh_create_date` timestamp column for audit tracking.
+
+## CRM Tables
+
+### crm_cust_info
+
+Cleaned customer information from the CRM system with standardized gender and marital status values.
+
+<ParamField path="cst_id" type="INT">
+  Customer ID (primary identifier)
+</ParamField>
+
+<ParamField path="cst_key" type="VARCHAR(50)">
+  Customer key (trimmed)
+</ParamField>
+
+<ParamField path="cst_firstname" type="VARCHAR(100)">
+  Customer first name
+</ParamField>
+
+<ParamField path="cst_lastname" type="VARCHAR(100)">
+  Customer last name
+</ParamField>
+
+<ParamField path="cst_marital_status" type="VARCHAR(100)">
+  Marital status (standardized: 'Single', 'Married', 'n/a')
+</ParamField>
+
+<ParamField path="cst_gndr" type="VARCHAR(10)">
+  Gender (standardized: 'Male', 'Female', 'n/a')
+</ParamField>
+
+<ParamField path="cst_create_date" type="DATE">
+  Date when customer record was created
+</ParamField>
+
+<ParamField path="dwh_create_date" type="TIMESTAMP">
+  Data warehouse ingestion timestamp (default: CURRENT_TIMESTAMP)
+</ParamField>
+
+<CodeGroup>
+```sql DDL
+DROP TABLE IF EXISTS silver.crm_cust_info;
+CREATE TABLE silver.crm_cust_info (
+    cst_id INT,
+    cst_key VARCHAR(50),
+    cst_firstname VARCHAR(100),
+    cst_lastname VARCHAR(100),
+    cst_marital_status VARCHAR(100),
+    cst_gndr VARCHAR(10),
+    cst_create_date DATE,
+    dwh_create_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+</CodeGroup>
+
+---
+
+### crm_prd_info
+
+Cleaned product information with parsed category IDs and standardized product lines.
+
+<ParamField path="prd_id" type="INT">
+  Product ID
+</ParamField>
+
+<ParamField path="cat_id" type="VARCHAR(50)">
+  Category ID (extracted from product key)
+</ParamField>
+
+<ParamField path="prd_key" type="VARCHAR(50)">
+  Product key (parsed from original)
+</ParamField>
+
+<ParamField path="prd_name" type="VARCHAR(100)">
+  Product name
+</ParamField>
+
+<ParamField path="prd_cost" type="DECIMAL(10, 2)">
+  Product cost
+</ParamField>
+
+<ParamField path="prd_line" type="VARCHAR(50)">
+  Product line (standardized: 'Mountain', 'Road', 'Other sales', 'Touring', 'n/a')
+</ParamField>
+
+<ParamField path="prd_start_dt" type="DATE">
+  Product availability start date
+</ParamField>
+
+<ParamField path="prd_end_dt" type="DATE">
+  Product availability end date (calculated using LEAD window function)
+</ParamField>
+
+<ParamField path="dwh_create_date" type="TIMESTAMP">
+  Data warehouse ingestion timestamp (default: CURRENT_TIMESTAMP)
+</ParamField>
+
+<CodeGroup>
+```sql DDL
+DROP TABLE IF EXISTS silver.crm_prd_info;
+CREATE TABLE silver.crm_prd_info (
+    prd_id INT,
+    cat_id VARCHAR(50),
+    prd_key VARCHAR(50),
+    prd_name VARCHAR(100),
+    prd_cost DECIMAL(10, 2),
+    prd_line VARCHAR(50),
+    prd_start_dt DATE,
+    prd_end_dt DATE,
+    dwh_create_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+</CodeGroup>
+
+---
+
+### crm_sales_details
+
+Cleaned sales transaction details with validated dates and corrected price/sales calculations.
+
+<ParamField path="sls_ord_num" type="VARCHAR(50)">
+  Sales order number
+</ParamField>
+
+<ParamField path="sls_prd_key" type="VARCHAR(50)">
+  Product key (foreign key to products)
+</ParamField>
+
+<ParamField path="sls_cust_id" type="INT">
+  Customer ID (foreign key to customers)
+</ParamField>
+
+<ParamField path="sls_ord_dt" type="DATE">
+  Order date (validated and converted from YYYYMMDD format)
+</ParamField>
+
+<ParamField path="sls_ship_dt" type="DATE">
+  Ship date (validated and converted from YYYYMMDD format)
+</ParamField>
+
+<ParamField path="sls_due_dt" type="DATE">
+  Due date (validated and converted from YYYYMMDD format)
+</ParamField>
+
+<ParamField path="sls_sales" type="INT">
+  Total sales amount (calculated/corrected as needed)
+</ParamField>
+
+<ParamField path="sls_quantity" type="INT">
+  Quantity sold
+</ParamField>
+
+<ParamField path="sls_price" type="DECIMAL(10, 2)">
+  Unit price (validated and corrected)
+</ParamField>
+
+<ParamField path="dwh_create_date" type="TIMESTAMP">
+  Data warehouse ingestion timestamp (default: CURRENT_TIMESTAMP)
+</ParamField>
+
+<CodeGroup>
+```sql DDL
+DROP TABLE IF EXISTS silver.crm_sales_details;
+CREATE TABLE silver.crm_sales_details (
+    sls_ord_num VARCHAR(50),
+    sls_prd_key VARCHAR(50),
+    sls_cust_id INT,
+    sls_ord_dt DATE,
+    sls_ship_dt DATE,
+    sls_due_dt DATE,
+    sls_sales INT,
+    sls_quantity INT,
+    sls_price DECIMAL(10, 2),
+    dwh_create_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+</CodeGroup>
+
+---
+
+## ERP Tables
+
+### erp_cust_az12
+
+Cleaned ERP customer data with validated birth dates and standardized gender values.
+
+<ParamField path="cid" type="VARCHAR(50)">
+  Customer ID (cleaned from source)
+</ParamField>
+
+<ParamField path="bdate" type="DATE">
+  Birth date (validated - future dates set to NULL)
+</ParamField>
+
+<ParamField path="gen" type="VARCHAR(10)">
+  Gender (standardized: 'Male', 'Female', 'n/a')
+</ParamField>
+
+<ParamField path="dwh_create_date" type="TIMESTAMP">
+  Data warehouse ingestion timestamp (default: CURRENT_TIMESTAMP)
+</ParamField>
+
+<CodeGroup>
+```sql DDL
+DROP TABLE IF EXISTS silver.erp_cust_az12;
+CREATE TABLE silver.erp_cust_az12 (
+    cid VARCHAR(50),
+    bdate DATE,
+    gen VARCHAR(10),
+    dwh_create_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+</CodeGroup>
+
+---
+
+### erp_loc_a101
+
+Cleaned ERP location data with standardized country names.
+
+<ParamField path="cid" type="VARCHAR(50)">
+  Customer ID (hyphens removed)
+</ParamField>
+
+<ParamField path="cntry" type="VARCHAR(100)">
+  Country (standardized: 'United States', 'Canada', 'Germany', etc.)
+</ParamField>
+
+<ParamField path="dwh_create_date" type="TIMESTAMP">
+  Data warehouse ingestion timestamp (default: CURRENT_TIMESTAMP)
+</ParamField>
+
+<CodeGroup>
+```sql DDL
+DROP TABLE IF EXISTS silver.erp_loc_a101;
+CREATE TABLE silver.erp_loc_a101 (
+    cid VARCHAR(50),
+    cntry VARCHAR(100),
+    dwh_create_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+</CodeGroup>
+
+---
+
+### erp_px_cat_g1v2
+
+ERP product category data (minimal transformations applied).
+
+<ParamField path="id" type="VARCHAR(50)">
+  Product category ID
+</ParamField>
+
+<ParamField path="cat" type="VARCHAR(50)">
+  Category
+</ParamField>
+
+<ParamField path="subcat" type="VARCHAR(50)">
+  Subcategory
+</ParamField>
+
+<ParamField path="manteinance" type="VARCHAR(50)">
+  Maintenance information
+</ParamField>
+
+<ParamField path="dwh_create_date" type="TIMESTAMP">
+  Data warehouse ingestion timestamp (default: CURRENT_TIMESTAMP)
+</ParamField>
+
+<CodeGroup>
+```sql DDL
+DROP TABLE IF EXISTS silver.erp_px_cat_g1v2;
+CREATE TABLE silver.erp_px_cat_g1v2 (
+    id VARCHAR(50),
+    cat VARCHAR(50),
+    subcat VARCHAR(50),
+    manteinance VARCHAR(50),
+    dwh_create_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+</CodeGroup>
+
+<Note>
+All Silver tables are truncated and reloaded during each ETL run via the `silver.load_silver()` stored procedure.
+</Note>

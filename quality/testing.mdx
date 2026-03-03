@@ -1,0 +1,406 @@
+---
+title: Data Quality Testing
+description: Comprehensive testing approach for validating data quality across Silver and Gold layers
+---
+
+## Overview
+
+Data quality testing ensures that data transformations produce accurate, complete, and consistent results across all layers of the data warehouse. Our testing strategy focuses on validating data integrity at both the Silver (cleaned and standardized) and Gold (dimensional model) layers.
+
+<Info>
+  All quality tests are designed to return **zero rows** when data quality is satisfactory. Any results indicate quality issues that need investigation.
+</Info>
+
+## Silver Layer Quality Checks
+
+The Silver layer tests validate cleaned and standardized data from various source systems (CRM and ERP).
+
+### Customer Data Quality (CRM)
+
+<AccordionGroup>
+  <Accordion title="Primary Key Integrity" icon="key">
+    Ensures no duplicate or null customer IDs exist in the system.
+
+    ```sql
+    -- Check for duplicate or null customer IDs
+    -- expected: no results
+    SELECT cst_id,
+           COUNT(*) 
+    FROM silver.crm_cust_info
+    GROUP BY cst_id
+    HAVING COUNT(*) > 1 OR cst_id IS NULL;
+    ```
+  </Accordion>
+
+  <Accordion title="Whitespace Validation" icon="text">
+    Verifies that customer data fields are properly trimmed and free of leading/trailing spaces.
+
+    ```sql
+    -- Check for unwanted spaces in customer keys
+    -- Expected: no results
+    SELECT cst_key 
+    FROM silver.crm_cust_info
+    WHERE cst_key != TRIM(cst_key);
+
+    -- Check for unwanted spaces in customer names
+    -- expected: no results
+    SELECT cst_firstname
+    FROM silver.crm_cust_info
+    WHERE cst_firstname != TRIM(cst_firstname); 
+
+    SELECT cst_lastname
+    FROM silver.crm_cust_info
+    WHERE cst_lastname != TRIM(cst_lastname);
+    ```
+  </Accordion>
+
+  <Accordion title="Data Standardization" icon="list-check">
+    Validates that categorical values are standardized to expected values.
+
+    ```sql
+    -- Data Standardization & consistency
+    SELECT DISTINCT cst_marital_status
+    FROM silver.crm_cust_info;
+    -- Expected values: 'Single', 'Married', 'n/a'
+
+    SELECT DISTINCT cst_gndr
+    FROM silver.crm_cust_info;
+    -- Expected values: 'Male', 'Female', 'n/a'
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Product Data Quality (CRM)
+
+<AccordionGroup>
+  <Accordion title="Primary Key Integrity" icon="key">
+    Ensures no duplicate or null product IDs exist.
+
+    ```sql
+    -- Check for NULLs or duplicates in Primary Key
+    -- expected: no results
+    SELECT prd_id,
+           COUNT(*) 
+    FROM silver.crm_prd_info
+    GROUP BY prd_id
+    HAVING COUNT(*) > 1 OR prd_id IS NULL;
+    ```
+  </Accordion>
+
+  <Accordion title="Data Cleanliness" icon="broom">
+    Validates product names are properly trimmed.
+
+    ```sql
+    -- Check for unwanted spaces in product names
+    -- expected: no results
+    SELECT prd_name
+    FROM silver.crm_prd_info
+    WHERE prd_name != TRIM(prd_name);
+    ```
+  </Accordion>
+
+  <Accordion title="Business Rule Validation" icon="circle-check">
+    Ensures product costs are valid (non-negative and non-null).
+
+    ```sql
+    -- Check for NULLs or Negative values in product cost
+    -- expected: no results
+    SELECT prd_cost
+    FROM silver.crm_prd_info
+    WHERE prd_cost < 0 OR prd_cost IS NULL;
+    ```
+  </Accordion>
+
+  <Accordion title="Temporal Integrity" icon="calendar">
+    Validates that product date ranges are logically consistent.
+
+    ```sql
+    -- Check for Invalid Dates Order
+    -- expected: no results
+    SELECT *
+    FROM silver.crm_prd_info
+    WHERE prd_end_dt < prd_start_dt;
+    ```
+  </Accordion>
+
+  <Accordion title="Product Line Standardization" icon="layer-group">
+    Verifies product lines are standardized.
+
+    ```sql
+    -- Data Standardization & consistency
+    SELECT DISTINCT prd_line
+    FROM silver.crm_prd_info;
+    -- Expected values: 'Mountain', 'Road', 'Other sales', 'Touring', 'n/a'
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Sales Transaction Quality (CRM)
+
+<AccordionGroup>
+  <Accordion title="Date Format Validation" icon="calendar-check">
+    Ensures dates are in valid format and within reasonable ranges.
+
+    ```sql
+    -- Check for Invalid Dates
+    -- expected: no results
+    SELECT COALESCE(sls_due_dt, 0) AS sls_due_dt
+    FROM bronze.crm_sales_details
+    WHERE sls_due_dt <= 0 
+        OR LENGTH((sls_due_dt::TEXT)) != 8
+        OR sls_due_dt > 20500101
+        OR sls_due_dt < 19000101;
+    ```
+  </Accordion>
+
+  <Accordion title="Date Logic Validation" icon="arrow-right">
+    Validates that date sequences make logical sense (order before ship/due).
+
+    ```sql
+    -- Check for Invalid Date Orders (Order Date > Shipping/Due Dates)
+    -- Expected: No Results
+    SELECT *
+    FROM silver.crm_sales_details
+    WHERE sls_ord_dt > sls_ship_dt
+        OR sls_ord_dt > sls_due_dt;
+    ```
+  </Accordion>
+
+  <Accordion title="Mathematical Consistency" icon="calculator">
+    Ensures sales calculations are accurate (sales = quantity × price).
+
+    ```sql
+    -- Check Data Consistency: sales = Quantity * Price
+    -- Expected: No Results
+    SELECT sls_sales, 
+           sls_quantity, 
+           sls_price
+    FROM silver.crm_sales_details
+    WHERE sls_sales != sls_quantity * sls_price
+        OR sls_sales IS NULL
+        OR sls_quantity IS NULL
+        OR sls_price IS NULL
+        OR sls_quantity <= 0
+        OR sls_price <= 0
+        OR sls_sales <= 0
+    ORDER BY sls_sales, sls_quantity, sls_price;
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### ERP Data Quality Checks
+
+<AccordionGroup>
+  <Accordion title="Customer Demographics (erp_cust_az12)" icon="user">
+    Validates birthdate ranges and gender standardization.
+
+    ```sql
+    -- Identify Out-of-Range Dates
+    -- Expected: Birthdates between 1924 and today
+    SELECT DISTINCT bdate
+    FROM silver.erp_cust_az12
+    WHERE bdate < '1924-01-01'
+        OR bdate > CURRENT_DATE;
+
+    -- Data Standardization & consistency
+    SELECT DISTINCT gen
+    FROM silver.erp_cust_az12;
+    -- Expected values: 'Male', 'Female', 'n/a'
+    ```
+  </Accordion>
+
+  <Accordion title="Location Data (erp_loc_a101)" icon="location-dot">
+    Validates country code standardization.
+
+    ```sql
+    -- Data Standardization & consistency
+    SELECT DISTINCT cntry
+    FROM silver.erp_loc_a101
+    ORDER BY cntry;
+    -- Expected values: 'United States', 'Canada', 'Germany', 'n/a', etc.
+    ```
+  </Accordion>
+
+  <Accordion title="Product Categories (erp_px_cat_g1v2)" icon="tags">
+    Ensures category data is properly trimmed.
+
+    ```sql
+    -- Check for unwanted spaces
+    -- Expected: no results
+    SELECT *
+    FROM silver.erp_px_cat_g1v2
+    WHERE cat != TRIM(cat)
+        OR subcat != TRIM(subcat)
+        OR manteinance != TRIM(manteinance);
+
+    -- Data Standardization & consistency
+    SELECT DISTINCT manteinance
+    FROM silver.erp_px_cat_g1v2;
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Gold Layer Quality Checks
+
+The Gold layer tests validate the dimensional model for referential integrity and uniqueness constraints.
+
+<CardGroup cols={2}>
+  <Card title="Dimension Uniqueness" icon="fingerprint">
+    Ensures dimension tables maintain unique keys for proper fact table relationships.
+  </Card>
+  <Card title="Referential Integrity" icon="link">
+    Validates that all fact table foreign keys reference valid dimension records.
+  </Card>
+</CardGroup>
+
+### Dimension Table Integrity
+
+<Tabs>
+  <Tab title="Customer Dimension">
+    Validates uniqueness of customer dimension keys.
+
+    ```sql
+    -- Check 'gold.dim_customer'
+    -- Check for uniqueness of customer_key 
+    -- expected: 0 rows
+    SELECT customer_key,
+           COUNT(*) AS duplicate_count
+    FROM gold.dim_customer
+    GROUP BY customer_key
+    HAVING COUNT(*) > 1;
+    ```
+
+    <Warning>
+      Duplicate customer keys will cause incorrect aggregations in fact tables and reporting layers.
+    </Warning>
+  </Tab>
+
+  <Tab title="Product Dimension">
+    Validates uniqueness of product dimension keys.
+
+    ```sql
+    -- Check 'gold.dim_product'
+    -- Check for uniqueness of product_key 
+    -- expected: 0 rows
+    SELECT product_key,
+           COUNT(*) AS duplicate_count
+    FROM gold.dim_product
+    GROUP BY product_key
+    HAVING COUNT(*) > 1;
+    ```
+
+    <Warning>
+      Duplicate product keys will cause incorrect aggregations in fact tables and reporting layers.
+    </Warning>
+  </Tab>
+</Tabs>
+
+### Referential Integrity Checks
+
+Validates that all foreign keys in fact tables reference existing dimension records.
+
+```sql
+-- Foreign key integrity checks
+-- Expected: 0 rows (all keys should match)
+SELECT * 
+FROM gold.fact_sales f 
+LEFT JOIN gold.dim_customer cu
+    ON cu.customer_key = f.customer_key
+LEFT JOIN gold.dim_product p
+    ON p.product_key = f.product_key
+WHERE cu.customer_key IS NULL 
+   OR p.product_key IS NULL;
+```
+
+<Check>
+  This test ensures data integrity across the star schema. Any results indicate orphaned records that need investigation.
+</Check>
+
+## Running Quality Tests
+
+### Execute All Silver Layer Tests
+
+<Steps>
+  <Step title="Connect to Database">
+    Connect to your PostgreSQL data warehouse:
+
+    ```bash
+    psql -h localhost -U your_username -d your_database
+    ```
+  </Step>
+
+  <Step title="Run Silver Tests">
+    Execute the Silver layer quality check script:
+
+    ```bash
+    psql -h localhost -U your_username -d your_database \
+      -f ~/workspace/source/tests/quality_check_silver.sql
+    ```
+
+    Or from within psql:
+
+    ```sql
+    \i ~/workspace/source/tests/quality_check_silver.sql
+    ```
+  </Step>
+
+  <Step title="Analyze Results">
+    Review the output. Any rows returned indicate quality issues that need to be addressed.
+  </Step>
+</Steps>
+
+### Execute All Gold Layer Tests
+
+<Steps>
+  <Step title="Run Gold Tests">
+    Execute the Gold layer quality check script:
+
+    ```bash
+    psql -h localhost -U your_username -d your_database \
+      -f ~/workspace/source/tests/quality_check_gold.sql
+    ```
+  </Step>
+
+  <Step title="Verify Integrity">
+    Ensure all dimension keys are unique and all foreign keys are valid.
+  </Step>
+</Steps>
+
+### Automated Testing Schedule
+
+<Note>
+  **Recommended Testing Frequency:**
+  - Run Silver layer tests after each ETL load
+  - Run Gold layer tests after dimensional model refresh
+  - Include quality checks in your CI/CD pipeline
+  - Set up alerts for any test failures
+</Note>
+
+## Test File Locations
+
+<CodeGroup>
+```bash Silver Layer Tests
+~/workspace/source/tests/quality_check_silver.sql
+```
+
+```bash Gold Layer Tests
+~/workspace/source/tests/quality_check_gold.sql
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Data Validation" icon="shield-check" href="/quality/validation">
+    Learn about data validation rules applied during transformations
+  </Card>
+  <Card title="Silver Layer" icon="filter" href="/pipeline/silver-layer">
+    Understand Silver layer transformation logic
+  </Card>
+  <Card title="Gold Layer" icon="gem" href="/pipeline/gold-layer">
+    Explore the dimensional model structure
+  </Card>
+  <Card title="ETL Procedures" icon="arrow-right-arrow-left" href="/pipeline/etl-procedures">
+    Review the complete ETL workflow
+  </Card>
+</CardGroup>
