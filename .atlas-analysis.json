@@ -1,0 +1,105 @@
+{
+  "projectType": "data-platform",
+  "projectName": "SQL Data Warehouse",
+  "projectDescription": "A modern data warehouse implementation using PostgreSQL with Medallion Architecture (Bronze-Silver-Gold layers) for ETL, data modeling, and analytics",
+  "theme": "aspen",
+  "primaryColor": "#2563eb",
+  "lightColor": "#3b82f6",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/medallion-layers",
+              "architecture/data-model"
+            ]
+          },
+          {
+            "group": "Setup & Deployment",
+            "pages": [
+              "setup/prerequisites",
+              "setup/installation",
+              "setup/docker-setup"
+            ]
+          },
+          {
+            "group": "Data Pipeline",
+            "pages": [
+              "pipeline/bronze-layer",
+              "pipeline/silver-layer",
+              "pipeline/gold-layer",
+              "pipeline/etl-procedures"
+            ]
+          },
+          {
+            "group": "Data Quality",
+            "pages": [
+              "quality/testing",
+              "quality/validation"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Schema Reference",
+        "groups": [
+          {
+            "group": "Bronze Schema",
+            "pages": [
+              "schema/bronze/crm-tables",
+              "schema/bronze/erp-tables"
+            ]
+          },
+          {
+            "group": "Silver Schema",
+            "pages": [
+              "schema/silver/cleaned-tables",
+              "schema/silver/transformations"
+            ]
+          },
+          {
+            "group": "Gold Schema",
+            "pages": [
+              "schema/gold/dimensions",
+              "schema/gold/facts"
+            ]
+          },
+          {
+            "group": "Procedures",
+            "pages": [
+              "schema/procedures/load-bronze",
+              "schema/procedures/load-silver"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Medallion Architecture (Bronze-Silver-Gold)",
+    "Automated ETL pipelines with stored procedures",
+    "Star schema dimensional modeling",
+    "Data quality validation and cleansing",
+    "Multi-source data integration (CRM and ERP)",
+    "Docker-based PostgreSQL deployment"
+  ],
+  "publicApiSurface": [
+    "bronze.load_bronze()",
+    "silver.load_silver()",
+    "gold.dim_customer",
+    "gold.dim_product",
+    "gold.fact_sales"
+  ]
+}
